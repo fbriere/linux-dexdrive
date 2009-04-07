@@ -1,0 +1,291 @@
+N64 notes:
+
+07 doesn't generate a reply (though it works)
+
+Light turns on automatically when transmitting (stays on after)
+
+01 returns 25 the first time a card is inserted
+
+blocks are 256-byte long
+
+DexPlorer tries to set port to 19200 first
+
+DexPlorer sends 03 00 00, Drive responds with 27
+
+
+====
+
+
+Serial port is set to 38400 -- limited success with 600.
+
+DexPlorer version 1.00.940
+
+DexDrive version 1.12  (how?)
+
+On box: CV-1128
+On DexDrive, manual and floppies: SV-1128
+
+(N64 is SV-388)
+
+Unit does not work well if plugging in serial port w/o power; it needs to
+be completely unplugged if this happens.  Once plugged in, power can be
+removed.
+
+Sometimes there's a weird feedback going on; unplugging the serial port
+is often enough.
+
+No, there's no USB version.
+
+Haven't tried N64 version yet.
+
+Availability: Still available, below $10 at EBworld.
+
+Corporate Info: http://www.interact-acc.com
+                (http://www.dexchange.net is no more)
+
+Links:  http://dexux.sourceforge.net
+
+What CPU?  Blob... :(
+
+
+COMMANDS
+========
+
+(C) indicates a command, and (R) a response.
+
+
+0x00 (C) INIT
+
+  Args: 17 bytes, contents unknown
+  Reply: ID
+
+0x01 (C) STATUS
+
+  Args: None
+  Reply: OK, OK_CARD
+
+0x02 (C) READ
+
+  Args: Block number (little-endian)
+  Reply: OK, DATA
+
+  OK is returned if there is no card.
+
+  Block number is ANDed with 0x03FF.
+
+0x04 (C) WRITE
+
+  Args: Block number (big-endian), reverse block number (little-endian),
+        128 bytes of data, checksum
+  Reply: WRITE_OK, WRITE_SAME
+
+  The reversed block number is just that; exchange bits 0 and 15, 1 and 14,
+  and so on.  You can see it as reversing all 16 bits, then sending the
+  result in little-endian order; or as reversing each byte individually (ie.
+  byte1, byte2, byte1-rev, byte2-rev) if it suits you better.
+
+  The checksum is merely an XOR of all the other 132 bytes.
+  
+  If the block numbers don't match, or if the checksum is invalid (perhaps
+  there was interference), ERROR will be returned.
+
+0x05 (C) PAGE
+
+  Args: <flags> <n>
+  Reply: OK, WAIT + OK_CARD
+
+  <flags>:
+    0x01  "Massive" card
+    0x40  Previous page
+    0x80  Fast forward
+    0xc0  Fast backward
+
+  <n> is ignored on Fast forward/backward.
+
+  Typically, only one of Next/Previous/Ffwd/Fbwd is used, along w/ the
+  massive flag; however, I have yet to see a combination that is rejected
+  by the DexDrive.  (And since I don't have a multi-page card, I can't
+  report on what happens.)
+
+  This command never fails; it returns OK if there is no card, and OK_CARD
+  even if the card was removed during the operation.
+
+0x07 (C) LIGHT
+
+  Args: 0 to turn off, 1 to turn on, other values ignored
+  Reply: (Last reply)
+
+  The reply will actually be a duplicate of the previous reply, without any
+  arguments.
+
+0x20 (R) POUT
+
+  Args: none
+
+  This will be issued in reply to *all* commands, until initialized.
+  See "pouting" section, below.
+
+0x21 (R) ERROR
+
+  Args: none
+
+  This indicates either an unknown command, a wrong number of arguments, or
+  a wrong checksum.  It is *not* used to indicate failure.
+
+0x22 (R) OK
+
+  Args: none
+
+  Indicates that the command was accepted.  This does not mean success --
+  trying to read when there is no card will return OK, because the command
+  is valid.
+
+  If a card is inserted, OK_CARD is returned instead.
+
+0x23 (R) OK_CARD
+
+  Args: (see description)
+
+  Is issued in place of OK when a card is inserted.
+
+  In response to PAGE, there are no arguments.
+
+  In response to STATUS, there is one argument: 0x10 when the card is
+  inserted, and 0x00 after the first sucessful write.
+  [Even if WRITE_SAME?]
+
+0x27 (C) MAGIC_HANDSHAKE
+
+  Args: none
+  Reply: ERROR
+
+  This command is used, after INIT, to bring the DexDrive back from its
+  "pouting" stage.  See the "pouting" section below.
+
+  For some reason, the DexDrive replies to this as an illegal command.
+
+0x28 (R) WRITE_OK
+
+  Args: none
+
+  Block has been written.
+
+0x29 (R) WRITE_SAME
+
+  Args: none
+
+  Same as WRITE_OK, but indicates that the write did not induce any change to
+  the block (ie. the data was the same).
+
+0x2a (R) WAIT
+
+  Args: none
+
+  When performing time-consuming page switches, the DexDrive will issue WAIT
+  replies at regular intervals, until a OK or OK_CARD is issued.
+
+0x40 (R) ID
+
+  Args: <magic number> <4-byte id string>
+
+  The magic number is derived from the 17-byte string sent with INIT, in a
+  cryptic fashion described below.
+
+  The 4-byte ID string is "PSXF" or "N64@" in my case.
+
+0x41 (R) DATA
+
+  Args: 128 bytes of data, <checksum>
+
+  Checksum is XOR of all 128 bytes, IIRC.
+
+  If the card was removed during the read, only a partial response will be
+  sent back.
+
+
+MAGIC FORMULA
+=============
+
+The "magic number" in ID is derived from the 17-byte string sent in AUTH.
+To do this, apply the following operations to each corresponding byte:
+
+	01: 0        09: AND 0x33
+	02: SWAP     10: AND 0x7E | (REV & 0x81)
+	03: ROR 1    11: 0
+	04: ROR 4    12: NOP
+	05: REV      13: XOR 0x34
+	06: NOP      14: AND 0x55
+	07: 0        15: 0
+	08: ROL 2    16: REV, then ROL 1
+	             17: AND 0x33
+
+Here are some definitions:
+
+ 0     Replace with 0x00
+ NOP   Do nothing -- use byte as-is
+ AND   Yes, *that* and operator. :)
+ XOR   Yes, *that* xor operator. :)
+ ROL   Rotate left by n bits
+ ROR   Rotate right by n bits
+ REV   Swap bits 0 and 7, 1 and 6, 2 and 5, 3 and 4
+ SWAP  Swap bits 0 and 1, 2 and 3, 4 and 5, 6 and 7
+
+(Byte 10 seems quite complex, but the overall effect is simply to swap bits 0
+and 7.)
+
+Once you're done, add all 17 bytes together, plus 0xa9; the lower 8 bits of
+the result (AND 0xff) hold the magic number.
+
+
+INITIALIZATION
+==============
+
+What DexPlorer does:
+
+ - send a string of 32 'X' (basically garbage) to each port, trying to find
+   the DexDrive, which will in turn return ERROR.  (A second attempt will be
+   made if nothing comes back after a certain delay.)
+ 
+ - send INIT, with the following string:
+
+     10 29 23 be 84 e1 6c d6 ae 52 90 49 f1 f1 bb e9 eb
+     10 B3 A6 DB 3C 87 0C 3E 99 24 5E 0D 1C 06 B7 47 DE (2nd try N64)
+
+
+ - send a bunch of 10 MAGIC_HANDSHAKE
+
+ - send ID
+
+ - send LIGHT 1 (to turn on the light)
+
+
+POUTING
+=======
+
+When a DexDrive is first plugged in, it will be in what I call the "pouting"
+stage, and will basically refuse to do anything until it is initialized.
+Any command beside INIT will get a POUT reply, and nothing will happen.
+(Invalid commands will still get ERROR replies, though.)
+
+To initialize the DexDrive, one must send an INIT command, followed up by
+a MAGIC_HANDSHAKE within (approx.) 100ms after the OK reply.
+
+The DexDrive will go back to pouting if both the serial and power are
+disconnected.  [do more tests here]
+
+
+TIMING
+======
+
+Delay for command completion: 10ms
+
+When switching pages:
+
+ Forward/backward:  620ms + 768ms/page
+                    192ms between replies, 4 replies/page
+ Same, w/ massive:  5184ms + 784ms/page
+                    176ms between replies, 4.46 replies/page
+
+ Fast forward/backward:  Equiv. to 2.16 pages, 12 replies
+ Same, w/ massive:       Equiv. to 4.43 pages, 51 replies
+
