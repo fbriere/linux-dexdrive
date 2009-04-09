@@ -102,8 +102,10 @@ struct dex_device {
 	int active;
 	/* input and output buffers */
 	char buf_in[DEX_BUFSIZE_IN], buf_out[DEX_BUFSIZE_OUT];
-	/* number of bytes read / to write / written */
-	int count_in, count_out, count_out_real;
+	/* number of bytes read / to write */
+	int count_in, count_out;
+	/* pointer to the next byte to be written */
+	char *ptr_out;
 	int media_present;
 	int media_change;
 	int minor;
@@ -142,6 +144,7 @@ inline char dex_checksum (char *ptr, int len) {
 
 /* Data transfer */
 
+void dex_tty_write (struct dex_device *dex);
 void dex_write_cmd (struct dex_device *dex) {
 	PDEBUG("> dex_write_cmd(%p)", dex);
 
@@ -185,10 +188,8 @@ void dex_write_cmd (struct dex_device *dex) {
 	}
 
 	dex->active = 1;
-	dex->tty->flags |= (1 << TTY_DO_WRITE_WAKEUP);
-	PDEBUG("writing %d bytes to device", dex->count_out);
-	dex->count_out_real = dex->tty->ops->write(dex->tty,
-			dex->buf_out, dex->count_out);
+	dex->ptr_out = dex->buf_out;
+	dex_tty_write(dex);
 
 	PDEBUG("< dex_write_cmd");
 }
@@ -324,6 +325,26 @@ int dex_transfer(struct dex_device *dex, unsigned int sector, unsigned int len,
 
 /* tty functions */
 
+void dex_tty_write (struct dex_device *dex)
+{
+	int i;
+
+	if (dex->active && (dex->count_out > 0)) {
+		PDEBUG("writing %d bytes to device", dex->count_out);
+
+		i = dex->tty->ops->write(dex->tty, dex->ptr_out, dex->count_out);
+		dex->ptr_out += i;
+		dex->count_out -= i;
+
+		PDEBUG("(%d bytes were written)", i);
+
+		if (dex->count_out > 0)
+			set_bit(TTY_DO_WRITE_WAKEUP, &dex->tty->flags);
+		else
+			clear_bit(TTY_DO_WRITE_WAKEUP, &dex->tty->flags);
+	}
+}
+
 void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 			char *fp, int count) {
 	struct dex_device *dex = tty->disc_data;
@@ -349,17 +370,11 @@ void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 void dex_write_wakeup (struct tty_struct *tty) {
 	struct dex_device *dex = tty->disc_data;
 	unsigned long flags;
-	int i;
 
 	PDEBUG("> dex_write_wakeup(%p)", tty);
 
 	spin_lock_irqsave(&dex->lock, flags);
-	if (dex->active && dex->count_out_real < dex->count_out) {
-		i = tty->ops->write(tty,
-				(dex->buf_out + dex->count_out_real),
-				(dex->count_out - dex->count_out_real));
-		dex->count_out_real += i;
-	}
+	dex_tty_write(dex);
 	spin_unlock_irqrestore(&dex->lock, flags);
 
 	PDEBUG("< dex_write_wakeup");
