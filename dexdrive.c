@@ -54,11 +54,7 @@ enum {
 #include <linux/module.h>
 
 unsigned int major = DEX_MAJOR;
-#define MAJOR_NR major
-#define DEVICE_NR(device) (MINOR(device))
-#define DEVICE_NAME DEX_NAME
-#define DEVICE_NO_RANDOM
-#include <linux/blk.h>
+#include <linux/blkdev.h>
 
 #include <linux/tty_ldisc.h>
 #include <linux/interrupt.h>
@@ -110,7 +106,8 @@ struct dex_device {
 	int media_present;
 	int media_change;
 	int minor;
-	request_queue_t request_queue;
+	struct gendisk *gd;
+	struct request_queue *request_queue;
 	int io_request;
 };
 
@@ -150,13 +147,10 @@ void dex_end_request (struct dex_device *dex, int x) {
 	dex->active = 0;
 
 	if (dex->io_request) {
-		spin_lock_irqsave(&io_request_lock, flags);
-		req = blkdev_entry_next_request(&dex->request_queue.queue_head);
-		if (end_that_request_first(req, x, DEX_NAME) == 0) {
-			blkdev_dequeue_request(req);
-			end_that_request_last(req);
-		}
-		spin_unlock_irqrestore(&io_request_lock, flags);
+		spin_lock_irqsave(&dex->request_queue->queue_lock, flags);
+		req = elv_next_request(dex->request_queue);
+		end_request(req, 1);
+		spin_unlock_irqrestore(&dex->request_queue->queue_lock, flags);
 	} else {
 		if (dex->request_return != NULL) {
 			*dex->request_return = x ? 0 : EIO;
@@ -477,7 +471,8 @@ int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
 }
 */
 
-void dex_request (request_queue_t *queue);
+void dex_request (struct request_queue *queue);
+extern struct block_device_operations dex_bdops;
 int dex_tty_open (struct tty_struct *tty) {
 	struct dex_device *tmp;
 	unsigned long flags;
@@ -490,8 +485,8 @@ int dex_tty_open (struct tty_struct *tty) {
 		return -ENOMEM;
 	}
 
-	blk_init_queue(&tmp->request_queue, dex_request);
-	blk_queue_headactive(&tmp->request_queue, 0);
+	spin_lock_init(&tmp->lock);
+	tmp->request_queue = blk_init_queue(dex_request, &tmp->lock);
 	init_waitqueue_head(&tmp->request_wait);
 
 	tmp->tty = tty;
@@ -517,6 +512,21 @@ int dex_tty_open (struct tty_struct *tty) {
 
 	MOD_INC_USE_COUNT;
 
+	tmp->gd = alloc_disk(1);
+	if (! tmp->gd) {
+		warn("cannot allocate gendisk struct");
+		// We need to clean up our mess
+		return -1;
+	}
+	tmp->gd->major = major;
+	tmp->gd->first_minor = 0;
+	tmp->gd->fops = &dex_bdops;
+	tmp->gd->queue = tmp->request_queue;
+	tmp->gd->private_data = tmp;
+	snprintf(tmp->gd->disk_name, 32, "dexdrive%u", 0);
+	set_capacity(tmp->gd, 128 * 2);
+	add_disk(tmp->gd);
+
 	PDEBUG("< dex_tty_open := %d", 0);
 	return 0;
 }
@@ -529,6 +539,12 @@ void dex_tty_close (struct tty_struct *tty) {
 	// check for dex->open_count == 0
 
 	dex_devices[0] = NULL;
+
+	del_gendisk(dex->gd);
+	put_disk(dex->gd);
+
+	if (dex->request_queue)
+		blk_cleanup_queue(dex->request_queue);
 
 	kfree(dex);
 
@@ -551,55 +567,33 @@ struct tty_ldisc dex_ldisc = {
 
 /* Block device functions */
 
-request_queue_t * dex_find_queue (kdev_t device) {
-	struct dex_device *dex = dex_devices[0];
-	PDEBUG("= dex_find_queue(%d)", device);
-	return (dex == NULL) ? NULL : &dex->request_queue;
-}
-
-void dex_request (request_queue_t *queue) {
+void dex_request (struct request_queue *queue) {
 	struct dex_device *dex;
 	struct request *req;
-	unsigned int flags;
 
 	PDEBUG("> dex_request(%p)", queue);
 
-	while (! list_empty(&queue->queue_head)) {
+	while ((req = elv_next_request(queue)) != NULL) {
 		PDEBUG("checking request head");
-		req = blkdev_entry_next_request(&queue->queue_head);
-		spin_unlock_irq (&io_request_lock);
-		PDEBUG("iolock released");
 
 		dex = dex_devices[0];
 		if (dex == NULL)
 			PDEBUG("request called with dex null -- dammit!");
 
-		spin_lock_irqsave(&dex->lock, flags);
-		blkdev_dequeue_request(req);
-		PDEBUG("request dequeued");
-
 		if (dex->request != DEX_REQ_NONE) {
 			PDEBUG("device is busy");
-			spin_unlock_irqrestore(&dex->lock, flags);
-			spin_lock_irq (&io_request_lock);
 			return;
 		}
 
-		switch (req->cmd) {
-			case READ:
+		if (rq_data_dir(req) == 0) {
 				dex->request_n = req->sector;
 				dex->request_ptr = req->buffer;
 				dex_do_cmd(dex, DEX_REQ_READ, 1);
-				break;
-			case WRITE:
+		} else {
 				dex->request_n = req->sector;
 				dex->request_ptr = req->buffer;
 				dex_do_cmd(dex, DEX_REQ_WRITE, 1);
-				break;
 		}
-
-		spin_unlock_irqrestore(&dex->lock, flags);
-		spin_lock_irq (&io_request_lock);
 	}
 
 	PDEBUG("< dex_request");
@@ -640,12 +634,10 @@ int dex_release (struct inode *inode, struct file *filp) {
 	return 0;
 }
 
-static struct block_device_operations dex_bdops = {
+struct block_device_operations dex_bdops = {
+	.owner			= THIS_MODULE,
 	.open			= dex_open,
 	.release		= dex_release,
-	.ioctl			= NULL,
-	.check_media_change	= NULL,
-	.revalidate		= NULL,
 };
 
 
@@ -656,8 +648,7 @@ void dex_cleanup (void) {
 	if (tty_register_ldisc(DEX_LDISC, NULL) != 0) {
 		warn("can't unregister ldisc");
 	}
-	if (unregister_blkdev(major, DEX_NAME) < 0)
-		warn("can't drop major %d", major);
+	unregister_blkdev(major, DEX_NAME);
 	PDEBUG("< dex_cleanup");
 }
 
@@ -665,14 +656,12 @@ int dex_init (void) {
 	int tmp;
 
 	PDEBUG("> dex_init()");
-	if ((tmp = register_blkdev(major, DEX_NAME, &dex_bdops)) < 0) {
+	if ((tmp = register_blkdev(major, DEX_NAME)) < 0) {
 		warn("can't get major %d", major);
 		return tmp;
 	}
 	if (major == 0) major = tmp;
 	PDEBUG("setting major to %d", major);
-
-	blk_dev[major].queue = dex_find_queue;
 
 	if (tty_register_ldisc(DEX_LDISC, &dex_ldisc) != 0) {
 		warn("can't set ldisc");
