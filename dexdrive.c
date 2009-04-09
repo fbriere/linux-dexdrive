@@ -382,10 +382,11 @@ int dex_receive_room (struct tty_struct *tty) {
 }
 
 void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
-			char *flags, int count) {
+			char *fp, int count) {
 	struct dex_device *dex = tty->disc_data;
+	unsigned long flags;
 
-	PDEBUG("> dex_receive_buf(%p, %p, %p, %u)", tty, buf, flags, count);
+	PDEBUG("> dex_receive_buf(%p, %p, %p, %u)", tty, buf, fp, count);
 
 	spin_lock_irqsave(&dex->lock, flags);
 	if(dex->active) {
