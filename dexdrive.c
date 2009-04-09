@@ -256,7 +256,8 @@ void dex_read_cmd (struct dex_device *dex) {
 
 	switch (mkpair(dex->request, reply)) {
 		case mkpair(DEX_REQ_READ, DEX_CMD_DATA):
-			if (dex_checksum((dex->buf_in + 4), 129) != 0) {
+			if ((dex_checksum((dex->buf_in + 4), 129) ^
+				lsb(dex->request_n) ^ msb(dex->request_n)) != 0) {
 				dex_end_request(dex, 0);
 				break;
 			}

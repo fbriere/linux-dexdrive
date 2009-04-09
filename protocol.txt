@@ -197,7 +197,7 @@ COMMANDS
 
   Args: 128 bytes of data, <checksum>
 
-  Checksum is XOR of all 128 bytes, IIRC.
+  Checksum is XOR of all 128 bytes, and the two bytes of the sector number.
 
   If the card was removed during the read, only a partial response will be
   sent back.
