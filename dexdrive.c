@@ -497,8 +497,6 @@ int dex_tty_open (struct tty_struct *tty) {
 		return -EIO;
 	}
 
-	MOD_INC_USE_COUNT;
-
 	tmp->gd = alloc_disk(1);
 	if (! tmp->gd) {
 		warn("cannot allocate gendisk struct");
@@ -534,8 +532,6 @@ void dex_tty_close (struct tty_struct *tty) {
 		blk_cleanup_queue(dex->request_queue);
 
 	kfree(dex);
-
-	MOD_DEC_USE_COUNT;
 
 	PDEBUG("< dex_tty_close");
 }
@@ -669,6 +665,4 @@ module_exit(dex_cleanup);
 MODULE_AUTHOR("fbriere");
 MODULE_DESCRIPTION("blabla");
 MODULE_LICENSE("GPL");
-
-EXPORT_NO_SYMBOLS;
 
