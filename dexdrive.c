@@ -466,7 +466,7 @@ int dex_tty_open (struct tty_struct *tty) {
 
 	PDEBUG("> dex_tty_open(%p)", tty);
 
-	if((tmp = kmalloc(sizeof(struct dex_device), GFP_ATOMIC)) == NULL) {
+	if((tmp = kmalloc(sizeof(struct dex_device), GFP_KERNEL)) == NULL) {
 		warn("cannot allocate device struct");
 		return -ENOMEM;
 	}
