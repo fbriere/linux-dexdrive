@@ -412,6 +412,10 @@ void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 
 	spin_lock_irqsave(&dex->lock, flags);
 	if(dex->active) {
+		if (count > DEX_BUFSIZE_IN - dex->count_in) {
+			warn("Input buffer overflowing");
+			count = DEX_BUFSIZE_IN - dex->count_in;
+		}
 		memcpy(dex->buf_in + dex->count_in, buf, count);
 		dex->count_in += count;
 		dex->last_read = jiffies;
