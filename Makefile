@@ -1,23 +1,29 @@
 #!/usr/bin/make -f
 
-KDIR = /var/tmp/1/linux-source-2.6.18
+EXTRA_CFLAGS = -O -g -Wall
 
-VERSIONFILE = $(KDIR)/include/linux/version.h
-VERSION  = $(shell awk -F\" '/REL/ {print $$2}' $(VERSIONFILE))
-INSTALLDIR = /lib/modules/$(VERSION)/misc
+ifneq ($(KERNELRELEASE),)
+# call from kernel build system
 
-include $(KDIR)/.config
+obj-m := dexdrive.o
 
-CFLAGS = -D__KERNEL__ -DMODULE -I$(KDIR)/include -O -Wall
+else
 
-all: dexdrive.o attach
+CFLAGS += -O2 -g -Wall
 
-install:
-	install -d $(INSTALLDIR)
-	install -c dexdrive.o $(INSTALLDIR)
+KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+PWD       := $(shell pwd)
+
+modules:
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
+
+endif
+
+
+all: attach
 
 clean:
-	rm -f *.o *~ core
+	rm -rf *.o *~ core .*.cmd *.ko *.mod.c .tmp_versions Module.markers Module.symvers modules.order
 
-.PHONY:	all install clean
+.PHONY:	all modules clean
 
