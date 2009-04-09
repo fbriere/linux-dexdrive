@@ -689,12 +689,9 @@ module_init(dex_init);
 module_exit(dex_cleanup);
 
 
-// MODULE_PARM
-// MODULE_PARM_DESC
-
 MODULE_AUTHOR("fbriere");
 MODULE_DESCRIPTION("blabla");
-MODULE_SUPPORTED_DEVICE("?");
+MODULE_LICENSE("GPL");
 
 EXPORT_NO_SYMBOLS;
 
