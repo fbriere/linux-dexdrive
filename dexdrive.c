@@ -11,8 +11,6 @@
 #define DEX_NDEVICES 2
 #define DEX_TIMEOUT 100 // in msecs
 #define DEX_TIMEOUTJ (DEX_TIMEOUT * HZ / 1000)
-#define DEX_TIMER 100 // in msecs
-#define DEX_TIMERJ (DEX_TIMER * HZ / 1000)
 #define DEX_IOC_MAGIC 0xfb
 
 enum {
@@ -66,7 +64,6 @@ unsigned int major = DEX_MAJOR;
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <asm/uaccess.h>
-#include <linux/timer.h>
 
 #define warn(msg, args...) \
 	printk(KERN_WARNING DEX_NAME ": " msg "\n" , ## args)
@@ -109,13 +106,10 @@ struct dex_device {
 	char buf_in[DEX_BUFSIZE_IN], buf_out[DEX_BUFSIZE_OUT];
 	/* number of bytes read / to write / written */
 	int count_in, count_out, count_out_real;
-	/* time of last read in jiffies -- used for timeout */
-	unsigned long last_read;
 	int media_present;
 	int media_change;
 	int minor;
 	request_queue_t request_queue;
-	struct timer_list timer;
 	int io_request;
 };
 
@@ -369,27 +363,6 @@ void dex_do_cmd (struct dex_device *dex, int cmd, int io_request) {
 }
 
 
-void dex_timer (unsigned long arg) {
-	struct dex_device *dex = (struct dex_device *) arg;
-	unsigned long flags;
-
-	//PDEBUG("> dex_timer(%p)", dex);
-
-	spin_lock_irqsave(&dex->lock, flags);
-	if (dex->active) {
-		if (dex->last_read + DEX_TIMEOUTJ > jiffies) {
-			dex_end_request(dex, 0);
-		}
-	} else if (dex->request == DEX_REQ_NONE) {
-		//dex_do_cmd(dex, DEX_REQ_STATUS, 0);
-	}
-	dex->timer.expires = jiffies + DEX_TIMERJ;
-	add_timer(&dex->timer);
-	spin_unlock_irqrestore(&dex->lock, flags);
-
-	//PDEBUG("< dex_timer");
-}
-
 /* tty functions */
 
 int dex_receive_room (struct tty_struct *tty) {
@@ -421,7 +394,6 @@ void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 		}
 		memcpy(dex->buf_in + dex->count_in, buf, count);
 		dex->count_in += count;
-		dex->last_read = jiffies;
 		if (dex_check_reply(dex)) {
 			dex_read_cmd(dex);
 		}
@@ -518,10 +490,6 @@ int dex_tty_open (struct tty_struct *tty) {
 	blk_queue_headactive(&tmp->request_queue, 0);
 	init_waitqueue_head(&tmp->request_wait);
 
-	init_timer(&tmp->timer);
-	tmp->timer.data = (unsigned long) tmp;
-	tmp->timer.function = dex_timer;
-
 	tmp->tty = tty;
 	tmp->open_count = 0;
 	tmp->request = DEX_REQ_NONE;
@@ -543,9 +511,6 @@ int dex_tty_open (struct tty_struct *tty) {
 		return -EIO;
 	}
 
-	tmp->timer.expires = jiffies + DEX_TIMERJ;
-	add_timer(&tmp->timer);
-
 	MOD_INC_USE_COUNT;
 
 	PDEBUG("< dex_tty_open := %d", 0);
@@ -558,9 +523,6 @@ void dex_tty_close (struct tty_struct *tty) {
 	PDEBUG("> dex_tty_close(%p)", tty);
 
 	// check for dex->open_count == 0
-
-	// ?
-	del_timer(&dex->timer);
 
 	if (dex->minor >= 0)
 		dex_devices[dex->minor] = NULL;
