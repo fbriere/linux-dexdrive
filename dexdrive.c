@@ -1,11 +1,21 @@
-/* Missing stuff...
- *
- * - command retries
- */
+#include <linux/module.h>
+#include <linux/init.h>
+
+#include <linux/kernel.h>
+#include <linux/slab.h>		/* kmalloc() */
+#include <linux/string.h>	/* memcpy() */
+#include <linux/spinlock.h>
+#include <linux/wait.h>
+#include <linux/sched.h>	/* linux/wait.h should include this one */
+
+#include <linux/blkdev.h>
+#include <linux/tty.h>
+#include <linux/tty_ldisc.h>
+
 
 #define DEX_NAME  "dexdrive"
 #define DEX_MAJOR 251
-#define DEX_LDISC N_X25  // Find one in include/asm/termios.h
+#define DEX_LDISC N_X25  // Find one in include/linux/tty.h
 #define DEX_BUFSIZE_OUT 1024 // Maximum is 137
 #define DEX_BUFSIZE_IN 1024 // Maximum is 208
 #define DEX_TIMEOUT 100 // in msecs
@@ -51,17 +61,7 @@ enum {
 #define DEX_IOCSMINOR	_IOW(DEX_IOC_MAGIC, 3, sizeof(int))
 */
 
-#include <linux/module.h>
-
 unsigned int major = DEX_MAJOR;
-#include <linux/blkdev.h>
-
-#include <linux/tty.h>
-#include <linux/tty_ldisc.h>
-#include <linux/interrupt.h>
-#include <linux/slab.h>
-#include <linux/spinlock.h>
-#include <asm/uaccess.h>
 
 #define warn(msg, args...) \
 	printk(KERN_WARNING DEX_NAME ": " msg "\n" , ## args)
