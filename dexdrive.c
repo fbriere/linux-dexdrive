@@ -15,14 +15,16 @@
 #define DEX_TIMERJ (DEX_TIMER * HZ / 1000)
 #define DEX_IOC_MAGIC 0xfb
 
-#define DEX_REQ_NONE	0
-#define DEX_REQ_READ	1
-#define DEX_REQ_WRITE	2
-#define DEX_REQ_INIT	3
-#define DEX_REQ_ON	4
-#define DEX_REQ_OFF	5
-#define DEX_REQ_STATUS	6
-#define DEX_REQ_PAGE	7  // Not implemented yet
+enum {
+	DEX_REQ_NONE,
+	DEX_REQ_READ,
+	DEX_REQ_WRITE,
+	DEX_REQ_INIT,
+	DEX_REQ_ON,
+	DEX_REQ_OFF,
+	DEX_REQ_STATUS,
+	DEX_REQ_PAGE	// Not implemented yet
+};
 
 #define DEX_CMD_INIT	'\x00'
 #define DEX_CMD_STATUS	'\x01'
