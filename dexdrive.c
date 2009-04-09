@@ -535,14 +535,14 @@ void dex_tty_close (struct tty_struct *tty) {
 }
 
 struct tty_ldisc dex_ldisc = {
-	magic: TTY_LDISC_MAGIC,
-	name:  DEX_NAME,
-	open:  dex_tty_open,
-	close: dex_tty_close,
-	ioctl: dex_tty_ioctl,
-	receive_buf:  dex_receive_buf,
-	receive_room: dex_receive_room,
-	write_wakeup: dex_write_wakeup,
+	.magic		= TTY_LDISC_MAGIC,
+	.name		= DEX_NAME,
+	.open		= dex_tty_open,
+	.close		= dex_tty_close,
+	.ioctl		= dex_tty_ioctl,
+	.receive_buf	= dex_receive_buf,
+	.receive_room	= dex_receive_room,
+	.write_wakeup	= dex_write_wakeup,
 };
 
 
@@ -639,11 +639,11 @@ int dex_release (struct inode *inode, struct file *filp) {
 }
 
 static struct block_device_operations dex_bdops = {
-	open:                dex_open,
-	release:             dex_release,
-	ioctl:               NULL,
-	check_media_change:  NULL,
-	revalidate:          NULL,
+	.open			= dex_open,
+	.release		= dex_release,
+	.ioctl			= NULL,
+	.check_media_change	= NULL,
+	.revalidate		= NULL,
 };
 
 
