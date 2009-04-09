@@ -45,9 +45,11 @@ enum {
 #define DEX_INIT_STR	"\x10\x29\x23\xbe\x84\xe1\x6c\xd6\xae\x52" \
 				"\x90\x49\xf1\xf1\xbb\xe9\xeb"
 
+/*
 #define DEX_IOCGMAJOR	_IOR(DEX_IOC_MAGIC, 1, sizeof(int))
 #define DEX_IOCGMINOR	_IOR(DEX_IOC_MAGIC, 2, sizeof(int))
 #define DEX_IOCSMINOR	_IOW(DEX_IOC_MAGIC, 3, sizeof(int))
+*/
 
 #include <linux/module.h>
 
@@ -421,6 +423,7 @@ void dex_write_wakeup (struct tty_struct *tty) {
 	PDEBUG("< dex_write_wakeup");
 }
 
+/*
 int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
 		unsigned int cmd, unsigned long arg) {
 	struct dex_device *dex = tty->disc_data;
@@ -471,6 +474,7 @@ int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
 	PDEBUG("< dex_tty_ioctl := %d", ret);
 	return ret;
 }
+*/
 
 void dex_request (request_queue_t *queue);
 int dex_tty_open (struct tty_struct *tty) {
@@ -537,7 +541,7 @@ struct tty_ldisc dex_ldisc = {
 	.name		= DEX_NAME,
 	.open		= dex_tty_open,
 	.close		= dex_tty_close,
-	.ioctl		= dex_tty_ioctl,
+	/* .ioctl	= dex_tty_ioctl, */
 	.receive_buf	= dex_receive_buf,
 	.receive_room	= dex_receive_room,
 	.write_wakeup	= dex_write_wakeup,

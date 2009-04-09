@@ -74,9 +74,11 @@ int setup(int fd, int minor) {
 	Wrap(ioctl(fd, TIOCSETD, &ldisc));
 	printf("done\n");
 
+	/*
 	printf("Setting minor device number... ");
 	Wrap(ioctl(fd, DEX_IOCSMINOR, &minor));
 	printf("done\n");
+	*/
 
 	for(;;) {
 		sleep(10000);
