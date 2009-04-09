@@ -179,7 +179,7 @@ void dex_write_cmd (struct dex_device *dex) {
 
 	PDEBUG("> dex_write_cmd(%p)", dex);
 
-	dex->count_out = 0;
+	dex->count_out = dex->count_in = 0;
 	add2bufs(DEX_CMD_PREFIX, sizeof(DEX_CMD_PREFIX)-1);
 	switch (dex->request) {
 		case DEX_REQ_READ:
@@ -412,7 +412,7 @@ void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 
 	spin_lock_irqsave(&dex->lock, flags);
 	if(dex->active) {
-		memcpy(dex->buf_in, buf, count);
+		memcpy(dex->buf_in + dex->count_in, buf, count);
 		dex->count_in += count;
 		dex->last_read = jiffies;
 		if (dex_check_reply(dex)) {
