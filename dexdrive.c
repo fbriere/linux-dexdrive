@@ -56,6 +56,7 @@ enum {
 unsigned int major = DEX_MAJOR;
 #include <linux/blkdev.h>
 
+#include <linux/tty.h>
 #include <linux/tty_ldisc.h>
 #include <linux/interrupt.h>
 #include <linux/slab.h>
@@ -216,7 +217,7 @@ void dex_write_cmd (struct dex_device *dex) {
 	dex->active = 1;
 	dex->tty->flags |= (1 << TTY_DO_WRITE_WAKEUP);
 	PDEBUG("writing %d bytes to device", dex->count_out);
-	dex->count_out_real = dex->tty->driver.write(dex->tty, 0,
+	dex->count_out_real = dex->tty->ops->write(dex->tty,
 			dex->buf_out, dex->count_out);
 
 	PDEBUG("< dex_write_cmd");
@@ -360,21 +361,6 @@ void dex_do_cmd (struct dex_device *dex, int cmd, int io_request) {
 
 /* tty functions */
 
-int dex_receive_room (struct tty_struct *tty) {
-	struct dex_device *dex = tty->disc_data;
-	unsigned long flags;
-	int i;
-
-	PDEBUG("> dex_receive_room(%p)", tty);
-
-	spin_lock_irqsave(&dex->lock, flags);
-	i = dex->active ? DEX_BUFSIZE_IN - dex->count_in : DEX_BUFSIZE_IN;
-	spin_unlock_irqrestore(&dex->lock, flags);
-
-	PDEBUG("< dex_receive_room := %d", i);
-	return i;
-}
-
 void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 			char *fp, int count) {
 	struct dex_device *dex = tty->disc_data;
@@ -408,7 +394,7 @@ void dex_write_wakeup (struct tty_struct *tty) {
 
 	spin_lock_irqsave(&dex->lock, flags);
 	if (dex->active && dex->count_out_real < dex->count_out) {
-		i = tty->driver.write(tty, 0,
+		i = tty->ops->write(tty,
 				(dex->buf_out + dex->count_out_real),
 				(dex->count_out - dex->count_out_real));
 		dex->count_out_real += i;
@@ -497,6 +483,7 @@ int dex_tty_open (struct tty_struct *tty) {
 	tmp->minor = -1;
 
 	tty->disc_data = tmp;
+	tty->receive_room = DEX_BUFSIZE_IN;
 
 	tmp->request_return = &ret;
 	spin_lock_irqsave(&tmp->lock, flags);
@@ -555,12 +542,12 @@ void dex_tty_close (struct tty_struct *tty) {
 
 struct tty_ldisc dex_ldisc = {
 	.magic		= TTY_LDISC_MAGIC,
+	.owner		= THIS_MODULE,
 	.name		= DEX_NAME,
 	.open		= dex_tty_open,
 	.close		= dex_tty_close,
 	/* .ioctl	= dex_tty_ioctl, */
 	.receive_buf	= dex_receive_buf,
-	.receive_room	= dex_receive_room,
 	.write_wakeup	= dex_write_wakeup,
 };
 
