@@ -164,13 +164,14 @@ static inline char dex_checksum (char *ptr, int len)
 
 /* Data transfer */
 
-static void dex_tty_write (struct dex_device *dex);
-static void dex_write_cmd (struct dex_device *dex)
+static int dex_prepare_cmd (struct dex_device *dex)
 {
-	PDEBUG("> dex_write_cmd(%p)", dex);
+	PDEBUG("> dex_prepare_cmd(%p)", dex);
 
-	dex->count_out = dex->count_in = 0;
+	dex->count_out = 0;
+
 	add2bufs(DEX_CMD_PREFIX, sizeof(DEX_CMD_PREFIX)-1);
+
 	switch (dex->request) {
 		case DEX_REQ_READ:
 			add2bufc(DEX_CMD_READ);
@@ -205,13 +206,13 @@ static void dex_write_cmd (struct dex_device *dex)
 			add2bufc(DEX_CMD_STATUS);
 			break;
 		default:
-			dex->request = DEX_REQ_NONE;
+			warn("Unknown command: %d", dex->request);
+			return -1;
 	}
 
-	dex->ptr_out = dex->buf_out;
-	dex_tty_write(dex);
+	PDEBUG("< dex_prepare_cmd");
 
-	PDEBUG("< dex_write_cmd");
+	return 0;
 }
 
 #define mkpair(req, reply) (((req) << 8) | (reply))
@@ -304,16 +305,44 @@ static void dex_check_reply (struct dex_device *dex)
 	PDEBUG("< dex_check_reply");
 }
 
+static void dex_tty_write (struct dex_device *dex);
 static int dex_do_cmd (struct dex_device *dex, int cmd)
 {
+	unsigned long flags;
+
 	PDEBUG("> dex_do_cmd(%p, %d", dex, cmd);
+
+	spin_lock_irqsave(&dex->lock, flags);
+
+	if (dex->request != DEX_REQ_NONE) {
+		spin_unlock_irqrestore(&dex->lock, flags);
+		warn("Already busy doing %i", dex->request);
+		return -EBUSY;
+	}
 
 	dex->request = cmd;
 	dex->request_return = -EIO;
 
-	dex_write_cmd(dex);
-	// Race condition here :(
+	if (dex_prepare_cmd(dex) < 0) {
+		dex->request = DEX_REQ_NONE;
+		spin_unlock_irqrestore(&dex->lock, flags);
+		return -EIO;
+	}
+
+	dex->ptr_out = dex->buf_out;
+	dex->count_in = 0;
+
+	dex_tty_write(dex);
+
+	spin_unlock_irqrestore(&dex->lock, flags);
+
+	/* FIXME: Race condition here -- wake_up may have already been called */
 	interruptible_sleep_on_timeout(&dex->request_wait, DEX_TIMEOUTJ);
+
+	/* FIXME: There's no guarantee that dex still exists at this point */
+
+	/* This will not have been cleared on timeout */
+	dex->request = DEX_REQ_NONE;
 
 	PDEBUG("< dex_do_cmd");
 
