@@ -110,6 +110,9 @@ struct dex_device {
 	struct gendisk *gd;
 	struct request_queue *request_queue;
 
+	struct bio		*bio_head;
+	struct bio		*bio_tail;
+
 	struct task_struct	*thread;
 	wait_queue_head_t	thread_wait;
 };
@@ -415,7 +418,7 @@ int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
 }
 */
 
-void dex_request (struct request_queue *queue);
+int dex_make_request (struct request_queue *, struct bio *);
 extern struct block_device_operations dex_bdops;
 int dex_thread (void *);
 int dex_tty_open (struct tty_struct *tty) {
@@ -429,8 +432,6 @@ int dex_tty_open (struct tty_struct *tty) {
 	}
 
 	spin_lock_init(&tmp->lock);
-	tmp->request_queue = blk_init_queue(dex_request, &tmp->lock);
-	tmp->request_queue->queuedata = tmp;
 	init_waitqueue_head(&tmp->request_wait);
 
 	tmp->tty = tty;
@@ -442,6 +443,12 @@ int dex_tty_open (struct tty_struct *tty) {
 
 	tty->disc_data = tmp;
 	tty->receive_room = DEX_BUFSIZE_IN;
+
+	tmp->request_queue = blk_alloc_queue(GFP_KERNEL);
+	tmp->request_queue->queuedata = tmp;
+	blk_queue_make_request(tmp->request_queue, dex_make_request);
+
+	tmp->bio_head = tmp->bio_tail = NULL;
 
 	init_waitqueue_head(&tmp->thread_wait);
 	tmp->thread = kthread_run(dex_thread, tmp, "dexdrive%d", 0);
@@ -507,50 +514,108 @@ struct tty_ldisc dex_ldisc = {
 
 /* Block device functions */
 
+static inline void dex_handle_bio(struct dex_device *dex, struct bio *bio)
+{
+	sector_t sector;
+	struct bio_vec *bvec;
+	int i;
+	int error = 0;
+	
+	PDEBUG(">> dex_handle_bio(%p, %p)", dex, bio);
+
+	sector = bio->bi_sector << 2;
+
+	bio_for_each_segment(bvec, bio, i) {
+		sector_t len = (bvec->bv_len >> 7);
+
+		if ((bvec->bv_len & 0x7f) != 0) {
+			warn (KERN_NOTICE "Partial read/write\n");
+			error = -EIO;
+			break;
+		}
+
+		error = dex_transfer(dex, sector, len,
+					kmap(bvec->bv_page) + bvec->bv_offset,
+					bio_data_dir(bio) == WRITE);
+
+		if (error < 0)
+			break;
+
+		sector += len;
+	}
+
+	bio_endio(bio, error);
+
+	PDEBUG("<< dex_handle_bio");
+}
+
+static void dex_add_bio(struct dex_device *dex, struct bio *bio)
+{
+	if (dex->bio_tail) {
+		dex->bio_tail->bi_next = bio;
+        } else {
+		dex->bio_head = bio;
+	}
+
+	dex->bio_tail = bio;
+}
+
+static struct bio *dex_get_bio(struct dex_device *dex)
+{
+	struct bio *bio;
+
+	if ((bio = dex->bio_head)) {
+		if (bio == dex->bio_tail)
+			dex->bio_tail = NULL;
+		dex->bio_head = bio->bi_next;
+		bio->bi_next = NULL;
+	}
+
+	return bio;
+}
+
+
+int dex_make_request (struct request_queue *queue, struct bio *bio) {
+	struct dex_device *dex = queue->queuedata;
+
+	PDEBUG("> dex_make_request(%p, %p)", queue, bio);
+
+	spin_lock_irq(&dex->lock);
+	dex_add_bio(dex, bio);
+	wake_up(&dex->thread_wait);
+	spin_unlock_irq(&dex->lock);
+
+	PDEBUG("< dex_make_request");
+
+	return 0;
+}
+
 int dex_thread (void *data) {
 	struct dex_device *dex = data;
-	struct request *req;
-	unsigned long flags;
-	int ret;
+	struct bio *bio;
 
 	PDEBUG(">> dex_thread starting");
 
 	// set_user_nice(current, -20);
 
-	while (!kthread_should_stop() || !list_empty(&dex->request_queue->queue_head)) {
+	while (!kthread_should_stop() || dex->bio_head) {
 		/* TODO: ping the device regularly */
 		wait_event_interruptible(dex->thread_wait,
-				!list_empty(&dex->request_queue->queue_head) || kthread_should_stop());
+				dex->bio_head || kthread_should_stop());
 
-		if (list_empty(&dex->request_queue->queue_head))
+		if (! dex->bio_head)
 			continue;
 
 		spin_lock_irq(&dex->lock);
-		req = elv_next_request(dex->request_queue);
+		bio = dex_get_bio(dex);
 		spin_unlock_irq(&dex->lock);
 
-		ret = dex_transfer(dex, req->sector << 2, 4, req->buffer,
-							rq_data_dir(req));
-
-		spin_lock_irqsave(&dex->request_queue->queue_lock, flags);
-		req = elv_next_request(dex->request_queue);
-		end_request(req, ret);
-		spin_unlock_irqrestore(&dex->request_queue->queue_lock, flags);
+		dex_handle_bio(dex, bio);
 	}
 
 	PDEBUG("<< dex_thread exiting");
 
 	return 0;
-}
-
-void dex_request (struct request_queue *queue) {
-	struct dex_device *dex = queue->queuedata;
-
-	PDEBUG("> dex_request(%p)", queue);
-
-	wake_up(&dex->thread_wait);
-
-	PDEBUG("< dex_request");
 }
 
 int dex_open (struct inode *inode, struct file *filp) {
