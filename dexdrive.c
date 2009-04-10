@@ -2,6 +2,7 @@
 #include <linux/init.h>
 
 #include <linux/kernel.h>
+#include <linux/kthread.h>
 #include <linux/slab.h>		/* kmalloc() */
 #include <linux/string.h>	/* memcpy() */
 #include <linux/spinlock.h>
@@ -96,8 +97,8 @@ struct dex_device {
 	int request_tmp;
 	/* wait queue to wake up when request is completed */
 	wait_queue_head_t request_wait;
-	/* where to store return value of request */
-	int *request_return;
+	/* return value of request */
+	int request_return;
 	/* we are in the process of talking with the device */
 	int active;
 	/* input and output buffers */
@@ -110,6 +111,9 @@ struct dex_device {
 	struct gendisk *gd;
 	struct request_queue *request_queue;
 	int io_request;
+
+	struct task_struct	*thread;
+	wait_queue_head_t	thread_wait;
 };
 
 
@@ -150,13 +154,10 @@ void dex_end_request (struct dex_device *dex, int x) {
 		req = elv_next_request(dex->request_queue);
 		end_request(req, 1);
 		spin_unlock_irqrestore(&dex->request_queue->queue_lock, flags);
-	} else {
-		if (dex->request_return != NULL) {
-			*dex->request_return = x ? 0 : EIO;
-			dex->request_return = NULL;
-		}
-		wake_up_interruptible(&dex->request_wait);
 	}
+
+	dex->request_return = x ? 0 : -EIO;
+	wake_up_interruptible(&dex->request_wait);
 
 	dex->request = DEX_REQ_NONE;
 
@@ -347,13 +348,21 @@ int dex_check_reply (struct dex_device *dex) {
 }
 
 
-void dex_do_cmd (struct dex_device *dex, int cmd, int io_request) {
+int dex_do_cmd (struct dex_device *dex, int cmd, int io_request) {
 	PDEBUG("> dex_do_cmd(%p, %d, %d", dex, cmd, io_request);
+
 	dex->request = cmd;
+	dex->request_return = -EIO;
 	dex->request_tmp = 0;
 	dex->io_request = io_request;
+
 	dex_write_cmd(dex);
+	// Race condition here :(
+	interruptible_sleep_on_timeout(&dex->request_wait, DEX_TIMEOUTJ);
+
 	PDEBUG("< dex_do_cmd");
+
+	return dex->request_return;
 }
 
 
@@ -457,6 +466,7 @@ int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
 
 void dex_request (struct request_queue *queue);
 extern struct block_device_operations dex_bdops;
+int dex_thread (void *);
 int dex_tty_open (struct tty_struct *tty) {
 	struct dex_device *tmp;
 	unsigned long flags;
@@ -484,16 +494,21 @@ int dex_tty_open (struct tty_struct *tty) {
 	tty->disc_data = tmp;
 	tty->receive_room = DEX_BUFSIZE_IN;
 
-	tmp->request_return = &ret;
 	spin_lock_irqsave(&tmp->lock, flags);
-	dex_do_cmd(tmp, DEX_REQ_INIT, 0);
+	ret = dex_do_cmd(tmp, DEX_REQ_INIT, 0);
 	spin_unlock_irqrestore(&tmp->lock, flags);
-	// Race condition here :(
-	interruptible_sleep_on_timeout(&tmp->request_wait, DEX_TIMEOUTJ);
 
 	if(ret != 0) {
 		kfree(tmp);
 		return -EIO;
+	}
+
+	init_waitqueue_head(&tmp->thread_wait);
+	tmp->thread = kthread_run(dex_thread, tmp, "dexdrive%d", 0);
+
+	if (IS_ERR(tmp->thread)) {
+		warn("cannot create thread");
+		/* FIXME: We need to clean up here */
 	}
 
 	tmp->gd = alloc_disk(1);
@@ -530,6 +545,9 @@ void dex_tty_close (struct tty_struct *tty) {
 	if (dex->request_queue)
 		blk_cleanup_queue(dex->request_queue);
 
+	kthread_stop(dex->thread);
+
+	/* FIXME: The thread could still be running here */
 	kfree(dex);
 
 	PDEBUG("< dex_tty_close");
@@ -549,23 +567,25 @@ struct tty_ldisc dex_ldisc = {
 
 /* Block device functions */
 
-void dex_request (struct request_queue *queue) {
-	struct dex_device *dex;
+int dex_thread (void *data) {
+	struct dex_device *dex = data;
 	struct request *req;
 
-	PDEBUG("> dex_request(%p)", queue);
+	PDEBUG(">> dex_thread starting");
 
-	while ((req = elv_next_request(queue)) != NULL) {
-		PDEBUG("checking request head");
+	// set_user_nice(current, -20);
 
-		dex = queue->queuedata;
-		if (dex == NULL)
-			PDEBUG("request called with dex null -- dammit!");
+	while (!kthread_should_stop() || !list_empty(&dex->request_queue->queue_head)) {
+		/* TODO: ping the device regularly */
+		wait_event_interruptible(dex->thread_wait,
+				!list_empty(&dex->request_queue->queue_head) || kthread_should_stop());
 
-		if (dex->request != DEX_REQ_NONE) {
-			PDEBUG("device is busy");
-			return;
-		}
+		if (list_empty(&dex->request_queue->queue_head))
+			continue;
+
+		spin_lock_irq(&dex->lock);
+		req = elv_next_request(dex->request_queue);
+		spin_unlock_irq(&dex->lock);
 
 		if (rq_data_dir(req) == 0) {
 				dex->request_n = req->sector;
@@ -577,6 +597,18 @@ void dex_request (struct request_queue *queue) {
 				dex_do_cmd(dex, DEX_REQ_WRITE, 1);
 		}
 	}
+
+	PDEBUG("<< dex_thread exiting");
+
+	return 0;
+}
+
+void dex_request (struct request_queue *queue) {
+	struct dex_device *dex = queue->queuedata;
+
+	PDEBUG("> dex_request(%p)", queue);
+
+	wake_up(&dex->thread_wait);
 
 	PDEBUG("< dex_request");
 }
