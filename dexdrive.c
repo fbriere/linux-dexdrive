@@ -28,6 +28,7 @@ enum {
 	DEX_REQ_READ,
 	DEX_REQ_WRITE,
 	DEX_REQ_INIT,
+	DEX_REQ_MAGIC,
 	DEX_REQ_ON,
 	DEX_REQ_OFF,
 	DEX_REQ_STATUS,
@@ -180,12 +181,11 @@ void dex_write_cmd (struct dex_device *dex) {
 			add2bufc(dex_checksum((dex->buf_out + 4), 132));
 			break;
 		case DEX_REQ_INIT:
-			if(dex->request_tmp == 0) {
-				add2bufc(DEX_CMD_INIT);
-				add2bufs(DEX_INIT_STR, sizeof(DEX_INIT_STR)-1);
-			} else {
-				add2bufc(DEX_CMD_MAGIC);
-			}
+			add2bufc(DEX_CMD_INIT);
+			add2bufs(DEX_INIT_STR, sizeof(DEX_INIT_STR)-1);
+			break;
+		case DEX_REQ_MAGIC:
+			add2bufc(DEX_CMD_MAGIC);
 			break;
 		case DEX_REQ_ON:
 			add2bufc(DEX_CMD_LIGHT);
@@ -223,7 +223,7 @@ void dex_read_cmd (struct dex_device *dex) {
 		reply = DEX_CMD_OK;
 	}
 
-	if ((dex->request == DEX_REQ_INIT) && (dex->request_tmp == 1)) {
+	if (dex->request == DEX_REQ_MAGIC) {
 		PDEBUG("faking CMD_OK for CMD_MAGIC");
 		reply = DEX_CMD_OK;
 	}
@@ -258,10 +258,9 @@ void dex_read_cmd (struct dex_device *dex) {
 			dex_end_request(dex, 0);
 			break;
 		case mkpair(DEX_REQ_INIT, DEX_CMD_ID):
-			dex->request_tmp++;
-			dex_write_cmd(dex);
+			dex_end_request(dex, 1);
 			break;
-		case mkpair(DEX_REQ_INIT, DEX_CMD_OK):
+		case mkpair(DEX_REQ_MAGIC, DEX_CMD_OK):
 		case mkpair(DEX_REQ_ON, DEX_CMD_OK):
 		case mkpair(DEX_REQ_OFF, DEX_CMD_OK):
 			dex_end_request(dex, 1);
@@ -567,6 +566,7 @@ int dex_thread (void *data) {
 		spin_unlock_irq(&dex->lock);
 
 		dex_do_cmd(dex, DEX_REQ_INIT);
+		dex_do_cmd(dex, DEX_REQ_MAGIC);
 
 		if (rq_data_dir(req) == 0) {
 				dex->request_n = req->sector;
