@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <sys/ioctl.h>
+#include <string.h>
 
 #define DEX_LDISC N_X25
 #define DEX_BAUD  B38400
