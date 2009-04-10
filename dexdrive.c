@@ -220,6 +220,11 @@ int dex_read_cmd (struct dex_device *dex) {
 		return -EIO;
 	}
 
+	if (reply == DEX_CMD_POUT) {
+		PDEBUG("got CMD_POUT");
+		return -EIO;
+	}
+
 	switch (mkpair(dex->request, reply)) {
 		case mkpair(DEX_REQ_READ, DEX_CMD_DATA):
 			if (n_args < 129) return 0;
