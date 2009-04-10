@@ -98,8 +98,6 @@ struct dex_device {
 	wait_queue_head_t request_wait;
 	/* return value of request */
 	int request_return;
-	/* we are in the process of talking with the device */
-	int active;
 	/* input and output buffers */
 	char buf_in[DEX_BUFSIZE_IN], buf_out[DEX_BUFSIZE_OUT];
 	/* number of bytes read / to write */
@@ -187,7 +185,6 @@ void dex_write_cmd (struct dex_device *dex) {
 			dex->request = DEX_REQ_NONE;
 	}
 
-	dex->active = 1;
 	dex->ptr_out = dex->buf_out;
 	dex_tty_write(dex);
 
@@ -274,7 +271,6 @@ void dex_check_reply (struct dex_device *dex) {
 	ret = dex_read_cmd(dex);
 	PDEBUG(" got %i", ret);
 	if (ret != 0) {
-		dex->active = 0;
 		dex->request = DEX_REQ_NONE;
 		dex->request_return = ret < 0 ? ret : 0;
 		wake_up_interruptible(&dex->request_wait);
@@ -334,7 +330,7 @@ void dex_tty_write (struct dex_device *dex)
 {
 	int i;
 
-	if (dex->active && (dex->count_out > 0)) {
+	if (dex->count_out > 0) {
 		PDEBUG("writing %d bytes to device", dex->count_out);
 
 		i = dex->tty->ops->write(dex->tty, dex->ptr_out, dex->count_out);
@@ -358,7 +354,7 @@ void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 	PDEBUG("> dex_receive_buf(%p, %p, %p, %u)", tty, buf, fp, count);
 
 	spin_lock_irqsave(&dex->lock, flags);
-	if(dex->active) {
+	if(dex->request) {
 		if (count > DEX_BUFSIZE_IN - dex->count_in) {
 			warn("Input buffer overflowing");
 			count = DEX_BUFSIZE_IN - dex->count_in;
@@ -457,7 +453,6 @@ int dex_tty_open (struct tty_struct *tty) {
 	tmp->tty = tty;
 	tmp->open_count = 0;
 	tmp->request = DEX_REQ_NONE;
-	tmp->active = 0;
 	tmp->media_change = 0;
 	tmp->minor = -1;
 
