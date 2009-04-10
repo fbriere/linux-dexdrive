@@ -34,15 +34,18 @@
 #include <linux/tty_ldisc.h>
 
 
-#define DEX_NAME  "dexdrive"
-#define DEX_MAJOR 251
-#define DEX_LDISC N_X25  // Find one in include/linux/tty.h
-#define DEX_BUFSIZE_OUT 1024 // Maximum is 137
-#define DEX_BUFSIZE_IN 1024 // Maximum is 208
-#define DEX_TIMEOUT 100 // in msecs
-#define DEX_TIMEOUTJ (DEX_TIMEOUT * HZ / 1000)
-#define DEX_IOC_MAGIC 0xfb
+#define DEX_NAME	"dexdrive"	/* Driver name */
+#define DEX_MAJOR	251		/* Major device number */
+#define DEX_BUFSIZE_OUT	1024		/* Size of output buffer (min. 137) */
+#define DEX_BUFSIZE_IN	1024		/* Size of input buffer (min. 208) */
+#define DEX_TIMEOUT	100		/* Timeout in msecs when waiting */
+#define DEX_TIMEOUTJ	(DEX_TIMEOUT * HZ / 1000)	/* Equivalent in jiffies */
+/* #define DEX_IOC_MAGIC	0xfb */
 
+/* Line discipline number -- must be hijacked from include/linux/tty.h */
+#define DEX_LDISC N_X25
+
+/* List of operations we perform with the device */
 enum {
 	DEX_REQ_NONE,
 	DEX_REQ_READ,
@@ -55,6 +58,7 @@ enum {
 	DEX_REQ_PAGE	// Not implemented yet
 };
 
+/* List of opcodes */
 #define DEX_CMD_INIT	'\x00'
 #define DEX_CMD_STATUS	'\x01'
 #define DEX_CMD_READ	'\x02'
@@ -72,8 +76,10 @@ enum {
 #define DEX_CMD_ID	'\x40'
 #define DEX_CMD_DATA	'\x41'
 
+/* Prefix sent with all commands/replies */
 #define DEX_CMD_PREFIX	"IAI"
 
+/* Default init string used by InterAct's software */
 #define DEX_INIT_STR	"\x10\x29\x23\xbe\x84\xe1\x6c\xd6\xae\x52" \
 				"\x90\x49\xf1\xf1\xbb\xe9\xeb"
 
@@ -91,15 +97,6 @@ static unsigned int major = DEX_MAJOR;
 #define PDEBUG(msg, args...) \
 	printk(KERN_DEBUG DEX_NAME ": " msg "\n" , ## args)
 
-#define add2bufc(c) \
-	do { dex->buf_out[dex->count_out] = c; dex->count_out++; } while(0)
-
-#define add2bufs(s,n) \
-	do { memcpy(dex->buf_out + dex->count_out, s, n); \
-			dex->count_out += n; } while(0)
-
-#define lsb(x) ((x) & 0xff)
-#define msb(x) (((x) >> 8) & 0xff)
 
 /* Data associated with each device */
 struct dex_device {
@@ -124,21 +121,35 @@ struct dex_device {
 	int count_in, count_out;
 	/* pointer to the next byte to be written */
 	char *ptr_out;
+
 	int media_present;
 	int media_change;
 	int minor;
+
+	/* Disk device we have created */
 	struct gendisk *gd;
+	/* Dummy request queue -- which we don't use */
 	struct request_queue *request_queue;
-
-	struct bio		*bio_head;
-	struct bio		*bio_tail;
-
-	struct task_struct	*thread;
-	wait_queue_head_t	thread_wait;
+	/* Stack of block IO operations we need to perform */
+	struct bio *bio_head, *bio_tail;
+	/* Kernel thread responsible for dealing with the bio stack */
+	struct task_struct *thread;
+	/* Wait queue used to wake up the thread when filling the stack */
+	wait_queue_head_t thread_wait;
 };
 
 
-/* Helper functions */
+/* Low-level functions */
+
+#define add2bufc(c) \
+	do { dex->buf_out[dex->count_out] = c; dex->count_out++; } while(0)
+
+#define add2bufs(s,n) \
+	do { memcpy(dex->buf_out + dex->count_out, s, n); \
+			dex->count_out += n; } while(0)
+
+#define lsb(x) ((x) & 0xff)
+#define msb(x) (((x) >> 8) & 0xff)
 
 static inline int reverse_int (int x)
 {
@@ -162,8 +173,10 @@ static inline char dex_checksum (char *ptr, int len)
 }
 
 
-/* Data transfer */
-
+/*
+ * Fills buf_out with the data that will be sent to the device.  Returns <0
+ * in case of error.
+ */
 static int dex_prepare_cmd (struct dex_device *dex)
 {
 	PDEBUG("> dex_prepare_cmd(%p)", dex);
@@ -215,6 +228,11 @@ static int dex_prepare_cmd (struct dex_device *dex)
 	return 0;
 }
 
+/*
+ * Processes what has already been received in buf_in.  Returns >0 if the
+ * response has been processed, 0 if is currently incomplete, and <0 if there
+ * was an error.
+ */
 #define mkpair(req, reply) (((req) << 8) | (reply))
 static int dex_read_cmd (struct dex_device *dex)
 {
@@ -288,6 +306,13 @@ static int dex_read_cmd (struct dex_device *dex)
 }
 #undef mkpair
 
+
+/* High-level functions */
+
+/*
+ * Check if we have received a complete response, and process it if this is
+ * the case.  (This should currently be called while holding the spinlock.)
+ */
 static void dex_check_reply (struct dex_device *dex)
 {
 	int ret;
@@ -305,6 +330,10 @@ static void dex_check_reply (struct dex_device *dex)
 	PDEBUG("< dex_check_reply");
 }
 
+/*
+ * Send a command to the device and wait until the response has been
+ * processed.  Returns <0 in case of an error.
+ */
 static void dex_tty_write (struct dex_device *dex);
 static int dex_do_cmd (struct dex_device *dex, int cmd)
 {
@@ -349,7 +378,10 @@ static int dex_do_cmd (struct dex_device *dex, int cmd)
 	return dex->request_return;
 }
 
-
+/*
+ * Read/write a number of consecutive sectors from/to the device.  Returns <0
+ * in case of an error.
+ */
 static int dex_transfer(struct dex_device *dex,
 			unsigned int sector, unsigned int len,
 			char *buffer, int write)
@@ -382,6 +414,10 @@ static int dex_transfer(struct dex_device *dex,
 
 /* tty functions */
 
+/*
+ * Send as much of our buffer as possible to the tty driver.  This should be
+ * called while holding the spinlock.
+ */
 static void dex_tty_write (struct dex_device *dex)
 {
 	int i;
@@ -402,6 +438,7 @@ static void dex_tty_write (struct dex_device *dex)
 	}
 }
 
+/* Called by the tty driver when data is coming in */
 static void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 				char *fp, int count)
 {
@@ -425,6 +462,7 @@ static void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 	PDEBUG("< dex_receive_buf");
 }
 
+/* Called by the tty driver when there's room for sending more data */
 static void dex_write_wakeup (struct tty_struct *tty)
 {
 	struct dex_device *dex = tty->disc_data;
@@ -492,6 +530,10 @@ int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
 }
 */
 
+/*
+ * Called by the tty driver when associating a tty with our line discipline.
+ * We create and setup a new dex_device.
+ */
 static int dex_make_request (struct request_queue *, struct bio *);
 extern struct block_device_operations dex_bdops;
 static int dex_thread (void *);
@@ -551,6 +593,9 @@ static int dex_tty_open (struct tty_struct *tty)
 	return 0;
 }
 
+/*
+ * Called by the tty driver when our line discipline is torn down.
+ */
 static void dex_tty_close (struct tty_struct *tty)
 {
 	struct dex_device *dex = tty->disc_data;
@@ -589,6 +634,9 @@ static struct tty_ldisc dex_ldisc = {
 
 /* Block device functions */
 
+/*
+ * Handle a pending block IO operation.
+ */
 static inline void dex_handle_bio(struct dex_device *dex, struct bio *bio)
 {
 	sector_t sector;
@@ -624,6 +672,9 @@ static inline void dex_handle_bio(struct dex_device *dex, struct bio *bio)
 	PDEBUG("<< dex_handle_bio");
 }
 
+/*
+ * Add a bio to the queue -- must be called while holding the spinlock.
+ */
 static void dex_add_bio(struct dex_device *dex, struct bio *bio)
 {
 	if (dex->bio_tail) {
@@ -635,6 +686,9 @@ static void dex_add_bio(struct dex_device *dex, struct bio *bio)
 	dex->bio_tail = bio;
 }
 
+/*
+ * Remove a bio from the queue -- must be called while holding the spinlock.
+ */
 static struct bio *dex_get_bio(struct dex_device *dex)
 {
 	struct bio *bio;
@@ -649,7 +703,10 @@ static struct bio *dex_get_bio(struct dex_device *dex)
 	return bio;
 }
 
-
+/*
+ * Called by the kernel when a new block IO operation is created, which we
+ * add to the queue for dex_thread() to handle.
+ */
 static int dex_make_request (struct request_queue *queue, struct bio *bio)
 {
 	struct dex_device *dex = queue->queuedata;
@@ -666,6 +723,10 @@ static int dex_make_request (struct request_queue *queue, struct bio *bio)
 	return 0;
 }
 
+/*
+ * A kernel thread dedicated to processing bio's; it merely waits for more to
+ * appear on the stack, and dispatches them to dex_handle_bio().
+ */
 static int dex_thread (void *data)
 {
 	struct dex_device *dex = data;
@@ -695,6 +756,9 @@ static int dex_thread (void *data)
 	return 0;
 }
 
+/*
+ * Called when our block device is opened.
+ */
 static int dex_open (struct inode *inode, struct file *filp)
 {
 	struct dex_device *dex;
@@ -712,6 +776,9 @@ static int dex_open (struct inode *inode, struct file *filp)
 	return 0;
 }
 
+/*
+ * Called when our block device is closed.
+ */
 static int dex_release (struct inode *inode, struct file *filp)
 {
 	struct dex_device *dex;
