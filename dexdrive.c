@@ -139,20 +139,6 @@ inline char dex_checksum (char *ptr, int len) {
 
 /* Data transfer */
 
-void dex_end_request (struct dex_device *dex, int x) {
-	PDEBUG("> dex_end_request(%p, %d)", dex, x);
-
-	dex->active = 0;
-
-	dex->request_return = x ? 0 : -EIO;
-	wake_up_interruptible(&dex->request_wait);
-
-	dex->request = DEX_REQ_NONE;
-
-	PDEBUG("< dex_end_request");
-}
-
-
 void dex_write_cmd (struct dex_device *dex) {
 	PDEBUG("> dex_write_cmd(%p)", dex);
 
@@ -205,10 +191,14 @@ void dex_write_cmd (struct dex_device *dex) {
 }
 
 #define mkpair(req, reply) (((req) << 8) | (reply))
-void dex_read_cmd (struct dex_device *dex) {
+int dex_read_cmd (struct dex_device *dex) {
 	int reply = dex->buf_in[3];
+	int n_args = dex->count_in - 4;
 
-	PDEBUG("> dex_read_cmd(%p)", dex);
+	PDEBUG("> dex_read_cmd(%p) [ reply:%i n_args:%i ]", dex, reply, n_args);
+
+	if (dex->count_in < 4)
+		return(0);
 
 	/* There should be a better way to do this... */
 	if ((dex->request == DEX_REQ_ON) || (dex->request == DEX_REQ_OFF)) {
@@ -223,106 +213,66 @@ void dex_read_cmd (struct dex_device *dex) {
 
 	if (reply == DEX_CMD_ERROR) {
 		PDEBUG("got CMD_ERROR");
-		dex_end_request(dex, 0);
-		return;
+		return -EIO;
 	}
 
 	switch (mkpair(dex->request, reply)) {
 		case mkpair(DEX_REQ_READ, DEX_CMD_DATA):
+			if (n_args < 129) return 0;
 			if ((dex_checksum((dex->buf_in + 4), 129) ^
 				lsb(dex->request_n) ^ msb(dex->request_n)) != 0) {
-				dex_end_request(dex, 0);
-				break;
+				return -EIO;
 			}
 			memcpy(dex->request_ptr, (dex->buf_in + 4), 128);
-			dex_end_request(dex, 1);
-			break;
+			return 1;
 		case mkpair(DEX_REQ_WRITE, DEX_CMD_WOK):
 		case mkpair(DEX_REQ_WRITE, DEX_CMD_WSAME):
-			dex_end_request(dex, 1);
-			break;
+			return 1;
 		case mkpair(DEX_REQ_READ, DEX_CMD_OK):
 		case mkpair(DEX_REQ_WRITE, DEX_CMD_OK):
-			dex_end_request(dex, 0);
-			break;
+			return -EIO;
 		case mkpair(DEX_REQ_INIT, DEX_CMD_ID):
-			dex_end_request(dex, 1);
-			break;
+			if (n_args < 5) return 0;
+			return 1;
 		case mkpair(DEX_REQ_MAGIC, DEX_CMD_OK):
 		case mkpair(DEX_REQ_ON, DEX_CMD_OK):
 		case mkpair(DEX_REQ_OFF, DEX_CMD_OK):
-			dex_end_request(dex, 1);
-			break;
+			return 1;
 		case mkpair(DEX_REQ_STATUS, DEX_CMD_OK):
 			dex->media_change = 1;
 			dex->media_present = 0;
-			dex_end_request(dex, 1);
-			break;
+			return 1;
 		case mkpair(DEX_REQ_STATUS, DEX_CMD_OKCARD):
+			if (n_args < 1) return 0;
 			dex->media_present = 1;
 			// Should autodetect or something
 			//blk_size[major][dex->minor] = 128 * 1024;
-			dex_end_request(dex, 1);
-			break;
+			return 1;
 		default:
-			PDEBUG("got unknown reply from device");
-			dex_end_request(dex, 0);
+			PDEBUG("got unknown reply %i from device", reply);
+			return -EIO;
 	}
 
 	PDEBUG("< dex_read_cmd");
 }
 #undef mkpair
 
-int dex_check_reply (struct dex_device *dex) {
-	int i = -1;
+void dex_check_reply (struct dex_device *dex) {
+	int ret;
 
 	PDEBUG("> dex_check_reply(%p)", dex);
 
-	if (dex->count_in < 4)
-		return(0);
-
-	switch (dex->buf_in[3]) {
-		case DEX_CMD_POUT:
-		case DEX_CMD_ERROR:
-		case DEX_CMD_OK:
-		case DEX_CMD_WOK:
-		case DEX_CMD_WSAME:
-			i = 0;
-			break;
-		case DEX_CMD_ID:
-			i = 5;
-			break;
-		case DEX_CMD_DATA:
-			i = 129;
-			break;
-		case DEX_CMD_OKCARD:
-			switch (dex->request) {
-				case DEX_REQ_PAGE:
-					i = 0;
-					break;
-				case DEX_REQ_STATUS:
-					i = 1;
-					break;
-			}
-			break;
-		case DEX_CMD_WAIT:
-			if ( (dex->count_in > 0) &&
-					((dex->count_in % 4) == 0) &&
-					(dex->buf_in[ dex->count_in - 1 ] !=
-					 DEX_CMD_WAIT)) {
-				i = dex->count_in - 4;
-			}
-			break;
-		default:
-			PDEBUG("check_reply: what command did I send?");
+	ret = dex_read_cmd(dex);
+	PDEBUG(" got %i", ret);
+	if (ret != 0) {
+		dex->active = 0;
+		dex->request = DEX_REQ_NONE;
+		dex->request_return = ret < 0 ? ret : 0;
+		wake_up_interruptible(&dex->request_wait);
 	}
 
-	i += 4;
-
-	PDEBUG("< dex_check_reply := %d", (dex->count_in >= i));
-	return (dex->count_in >= i);
+	PDEBUG("< dex_check_reply");
 }
-
 
 int dex_do_cmd (struct dex_device *dex, int cmd) {
 	PDEBUG("> dex_do_cmd(%p, %d", dex, cmd);
@@ -338,6 +288,7 @@ int dex_do_cmd (struct dex_device *dex, int cmd) {
 
 	return dex->request_return;
 }
+
 
 int dex_transfer(struct dex_device *dex, unsigned int sector, unsigned int len,
 			char *buffer, int write)
@@ -385,9 +336,7 @@ void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 		}
 		memcpy(dex->buf_in + dex->count_in, buf, count);
 		dex->count_in += count;
-		if (dex_check_reply(dex)) {
-			dex_read_cmd(dex);
-		}
+		dex_check_reply(dex);
 	}
 	spin_unlock_irqrestore(&dex->lock, flags);
 
