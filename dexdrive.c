@@ -151,13 +151,16 @@ struct dex_device {
 #define lsb(x) ((x) & 0xff)
 #define msb(x) (((x) >> 8) & 0xff)
 
-static inline int reverse_int (int x)
+static inline unsigned char reverse_byte (unsigned char x)
 {
-	int i, res = 0;
+	unsigned char res = 0;
+	int i;
+
 	for (i = 0; i < 4; i++) {
 		res |= ((x & (1 << i)) << (7 - (2 * i)));
 		res |= ((x & (1 << (7 - i))) >> (7 - (2 * i)));
 	}
+
 	return res;
 }
 
@@ -195,8 +198,8 @@ static int dex_prepare_cmd (struct dex_device *dex)
 			add2bufc(DEX_CMD_WRITE);
 			add2bufc(msb(dex->request_n));
 			add2bufc(lsb(dex->request_n));
-			add2bufc(reverse_int(msb(dex->request_n)));
-			add2bufc(reverse_int(lsb(dex->request_n)));
+			add2bufc(reverse_byte(msb(dex->request_n)));
+			add2bufc(reverse_byte(lsb(dex->request_n)));
 			add2bufs(dex->request_ptr, 128);
 			add2bufc(dex_checksum((dex->buf_out + 4), 132));
 			break;
