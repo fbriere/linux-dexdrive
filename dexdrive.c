@@ -469,8 +469,6 @@ extern struct block_device_operations dex_bdops;
 int dex_thread (void *);
 int dex_tty_open (struct tty_struct *tty) {
 	struct dex_device *tmp;
-	unsigned long flags;
-	int ret = -1;
 
 	PDEBUG("> dex_tty_open(%p)", tty);
 
@@ -493,15 +491,6 @@ int dex_tty_open (struct tty_struct *tty) {
 
 	tty->disc_data = tmp;
 	tty->receive_room = DEX_BUFSIZE_IN;
-
-	spin_lock_irqsave(&tmp->lock, flags);
-	ret = dex_do_cmd(tmp, DEX_REQ_INIT, 0);
-	spin_unlock_irqrestore(&tmp->lock, flags);
-
-	if(ret != 0) {
-		kfree(tmp);
-		return -EIO;
-	}
 
 	init_waitqueue_head(&tmp->thread_wait);
 	tmp->thread = kthread_run(dex_thread, tmp, "dexdrive%d", 0);
@@ -586,6 +575,8 @@ int dex_thread (void *data) {
 		spin_lock_irq(&dex->lock);
 		req = elv_next_request(dex->request_queue);
 		spin_unlock_irq(&dex->lock);
+
+		dex_do_cmd(dex, DEX_REQ_INIT, 0);
 
 		if (rq_data_dir(req) == 0) {
 				dex->request_n = req->sector;
