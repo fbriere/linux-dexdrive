@@ -683,7 +683,7 @@ static void dex_cleanup (void) {
 	PDEBUG("< dex_cleanup");
 }
 
-static int dex_init (void) {
+static int __init dex_init (void) {
 	int tmp;
 
 	PDEBUG("> dex_init()");
