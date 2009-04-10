@@ -112,8 +112,6 @@ struct dex_device {
 	int io_request;
 };
 
-struct dex_device * dex_devices[1];
-
 
 /* Helper functions */
 
@@ -473,6 +471,7 @@ int dex_tty_open (struct tty_struct *tty) {
 
 	spin_lock_init(&tmp->lock);
 	tmp->request_queue = blk_init_queue(dex_request, &tmp->lock);
+	tmp->request_queue->queuedata = tmp;
 	init_waitqueue_head(&tmp->request_wait);
 
 	tmp->tty = tty;
@@ -523,7 +522,7 @@ void dex_tty_close (struct tty_struct *tty) {
 
 	// check for dex->open_count == 0
 
-	dex_devices[0] = NULL;
+	tty->disc_data = NULL;
 
 	del_gendisk(dex->gd);
 	put_disk(dex->gd);
@@ -559,7 +558,7 @@ void dex_request (struct request_queue *queue) {
 	while ((req = elv_next_request(queue)) != NULL) {
 		PDEBUG("checking request head");
 
-		dex = dex_devices[0];
+		dex = queue->queuedata;
 		if (dex == NULL)
 			PDEBUG("request called with dex null -- dammit!");
 
@@ -588,11 +587,7 @@ int dex_open (struct inode *inode, struct file *filp) {
 
 	PDEBUG("> dex_open(%p, %p)", inode, filp);
 
-	dex = dex_devices[0];
-	if (dex == NULL) {
-		PDEBUG("you cannot open device w/o ldisc");
-		return -ENXIO;
-	}
+	dex = inode->i_bdev->bd_disk->private_data;
 
 	spin_lock_irqsave(&dex->lock, flags);
 	dex->open_count++;
@@ -608,7 +603,7 @@ int dex_release (struct inode *inode, struct file *filp) {
 
 	PDEBUG("> dex_release(%p, %p)", inode, filp);
 
-	dex = dex_devices[0];
+	dex = inode->i_bdev->bd_disk->private_data;
 	spin_lock_irqsave(&dex->lock, flags);
 	dex->open_count--;
 	spin_unlock_irqrestore(&dex->lock, flags);
