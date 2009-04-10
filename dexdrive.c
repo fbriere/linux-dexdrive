@@ -94,8 +94,6 @@ struct dex_device {
 	/* arguments provided with the request */
 	int request_n;
 	void *request_ptr;
-	/* temp variable for requests */
-	int request_tmp;
 	/* wait queue to wake up when request is completed */
 	wait_queue_head_t request_wait;
 	/* return value of request */
@@ -156,8 +154,6 @@ void dex_end_request (struct dex_device *dex, int x) {
 
 
 void dex_write_cmd (struct dex_device *dex) {
-	int block;
-
 	PDEBUG("> dex_write_cmd(%p)", dex);
 
 	dex->count_out = dex->count_in = 0;
@@ -165,19 +161,16 @@ void dex_write_cmd (struct dex_device *dex) {
 	switch (dex->request) {
 		case DEX_REQ_READ:
 			add2bufc(DEX_CMD_READ);
-			block = (dex->request_n * 4) + dex->request_tmp;
-			add2bufc(lsb(block));
-			add2bufc(msb(block));
+			add2bufc(lsb(dex->request_n));
+			add2bufc(msb(dex->request_n));
 			break;
 		case DEX_REQ_WRITE:
 			add2bufc(DEX_CMD_WRITE);
-			block = (dex->request_n * 4) + dex->request_tmp;
-			add2bufc(msb(block));
-			add2bufc(lsb(block));
-			add2bufc(reverse_int(msb(block)));
-			add2bufc(reverse_int(lsb(block)));
-			add2bufs((dex->request_ptr + (dex->request_tmp * 128)),
-					128);
+			add2bufc(msb(dex->request_n));
+			add2bufc(lsb(dex->request_n));
+			add2bufc(reverse_int(msb(dex->request_n)));
+			add2bufc(reverse_int(lsb(dex->request_n)));
+			add2bufs(dex->request_ptr, 128);
 			add2bufc(dex_checksum((dex->buf_out + 4), 132));
 			break;
 		case DEX_REQ_INIT:
@@ -241,13 +234,8 @@ void dex_read_cmd (struct dex_device *dex) {
 				dex_end_request(dex, 0);
 				break;
 			}
-			memcpy((dex->request_ptr + (dex->request_tmp * 128)),
-					(dex->buf_in + 4), 128);
-			if (++dex->request_tmp == 4) {
-				dex_end_request(dex, 1);
-			} else {
-				dex_write_cmd(dex);
-			}
+			memcpy(dex->request_ptr, (dex->buf_in + 4), 128);
+			dex_end_request(dex, 1);
 			break;
 		case mkpair(DEX_REQ_WRITE, DEX_CMD_WOK):
 		case mkpair(DEX_REQ_WRITE, DEX_CMD_WSAME):
@@ -341,7 +329,6 @@ int dex_do_cmd (struct dex_device *dex, int cmd) {
 
 	dex->request = cmd;
 	dex->request_return = -EIO;
-	dex->request_tmp = 0;
 
 	dex_write_cmd(dex);
 	// Race condition here :(
@@ -350,6 +337,34 @@ int dex_do_cmd (struct dex_device *dex, int cmd) {
 	PDEBUG("< dex_do_cmd");
 
 	return dex->request_return;
+}
+
+int dex_transfer(struct dex_device *dex, unsigned int sector, unsigned int len,
+			char *buffer, int write)
+{
+	int error = 0;
+
+	PDEBUG("> dex_transfer(%p, %u, %u, %p, %i", dex, sector, len,
+					buffer, write);
+
+	for (; len > 0; sector++, len--) {
+		dex->request_n = sector;
+		dex->request_ptr = buffer;
+
+		dex_do_cmd(dex, DEX_REQ_INIT);
+		dex_do_cmd(dex, DEX_REQ_MAGIC);
+
+		error = dex_do_cmd(dex, write ? DEX_REQ_WRITE : DEX_REQ_READ);
+
+		if (error < 0)
+			break;
+
+		buffer += 128;
+	}
+
+	PDEBUG("< dex_transfer := %i", error);
+
+	return error;
 }
 
 
@@ -565,18 +580,8 @@ int dex_thread (void *data) {
 		req = elv_next_request(dex->request_queue);
 		spin_unlock_irq(&dex->lock);
 
-		dex_do_cmd(dex, DEX_REQ_INIT);
-		dex_do_cmd(dex, DEX_REQ_MAGIC);
-
-		if (rq_data_dir(req) == 0) {
-				dex->request_n = req->sector;
-				dex->request_ptr = req->buffer;
-				ret = dex_do_cmd(dex, DEX_REQ_READ);
-		} else {
-				dex->request_n = req->sector;
-				dex->request_ptr = req->buffer;
-				ret = dex_do_cmd(dex, DEX_REQ_WRITE);
-		}
+		ret = dex_transfer(dex, req->sector << 2, 4, req->buffer,
+							rq_data_dir(req));
 
 		spin_lock_irqsave(&dex->request_queue->queue_lock, flags);
 		req = elv_next_request(dex->request_queue);
