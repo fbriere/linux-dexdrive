@@ -110,7 +110,6 @@ struct dex_device {
 	int minor;
 	struct gendisk *gd;
 	struct request_queue *request_queue;
-	int io_request;
 
 	struct task_struct	*thread;
 	wait_queue_head_t	thread_wait;
@@ -142,19 +141,9 @@ inline char dex_checksum (char *ptr, int len) {
 /* Data transfer */
 
 void dex_end_request (struct dex_device *dex, int x) {
-	struct request *req;
-	unsigned long flags;
-
 	PDEBUG("> dex_end_request(%p, %d)", dex, x);
 
 	dex->active = 0;
-
-	if (dex->io_request) {
-		spin_lock_irqsave(&dex->request_queue->queue_lock, flags);
-		req = elv_next_request(dex->request_queue);
-		end_request(req, 1);
-		spin_unlock_irqrestore(&dex->request_queue->queue_lock, flags);
-	}
 
 	dex->request_return = x ? 0 : -EIO;
 	wake_up_interruptible(&dex->request_wait);
@@ -348,13 +337,12 @@ int dex_check_reply (struct dex_device *dex) {
 }
 
 
-int dex_do_cmd (struct dex_device *dex, int cmd, int io_request) {
-	PDEBUG("> dex_do_cmd(%p, %d, %d", dex, cmd, io_request);
+int dex_do_cmd (struct dex_device *dex, int cmd) {
+	PDEBUG("> dex_do_cmd(%p, %d", dex, cmd);
 
 	dex->request = cmd;
 	dex->request_return = -EIO;
 	dex->request_tmp = 0;
-	dex->io_request = io_request;
 
 	dex_write_cmd(dex);
 	// Race condition here :(
@@ -559,6 +547,8 @@ struct tty_ldisc dex_ldisc = {
 int dex_thread (void *data) {
 	struct dex_device *dex = data;
 	struct request *req;
+	unsigned long flags;
+	int ret;
 
 	PDEBUG(">> dex_thread starting");
 
@@ -576,17 +566,22 @@ int dex_thread (void *data) {
 		req = elv_next_request(dex->request_queue);
 		spin_unlock_irq(&dex->lock);
 
-		dex_do_cmd(dex, DEX_REQ_INIT, 0);
+		dex_do_cmd(dex, DEX_REQ_INIT);
 
 		if (rq_data_dir(req) == 0) {
 				dex->request_n = req->sector;
 				dex->request_ptr = req->buffer;
-				dex_do_cmd(dex, DEX_REQ_READ, 1);
+				ret = dex_do_cmd(dex, DEX_REQ_READ);
 		} else {
 				dex->request_n = req->sector;
 				dex->request_ptr = req->buffer;
-				dex_do_cmd(dex, DEX_REQ_WRITE, 1);
+				ret = dex_do_cmd(dex, DEX_REQ_WRITE);
 		}
+
+		spin_lock_irqsave(&dex->request_queue->queue_lock, flags);
+		req = elv_next_request(dex->request_queue);
+		end_request(req, ret);
+		spin_unlock_irqrestore(&dex->request_queue->queue_lock, flags);
 	}
 
 	PDEBUG("<< dex_thread exiting");
