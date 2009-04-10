@@ -63,7 +63,7 @@ enum {
 #define DEX_IOCSMINOR	_IOW(DEX_IOC_MAGIC, 3, sizeof(int))
 */
 
-unsigned int major = DEX_MAJOR;
+static unsigned int major = DEX_MAJOR;
 
 #define warn(msg, args...) \
 	printk(KERN_WARNING DEX_NAME ": " msg "\n" , ## args)
@@ -120,7 +120,7 @@ struct dex_device {
 
 /* Helper functions */
 
-inline int reverse_int (int x) {
+static inline int reverse_int (int x) {
 	int i, res = 0;
 	for (i = 0; i < 4; i++) {
 		res |= ((x & (1 << i)) << (7 - (2 * i)));
@@ -129,7 +129,7 @@ inline int reverse_int (int x) {
 	return res;
 }
 
-inline char dex_checksum (char *ptr, int len) {
+static inline char dex_checksum (char *ptr, int len) {
 	char res = 0;
 	int i;
 
@@ -142,8 +142,8 @@ inline char dex_checksum (char *ptr, int len) {
 
 /* Data transfer */
 
-void dex_tty_write (struct dex_device *dex);
-void dex_write_cmd (struct dex_device *dex) {
+static void dex_tty_write (struct dex_device *dex);
+static void dex_write_cmd (struct dex_device *dex) {
 	PDEBUG("> dex_write_cmd(%p)", dex);
 
 	dex->count_out = dex->count_in = 0;
@@ -192,7 +192,7 @@ void dex_write_cmd (struct dex_device *dex) {
 }
 
 #define mkpair(req, reply) (((req) << 8) | (reply))
-int dex_read_cmd (struct dex_device *dex) {
+static int dex_read_cmd (struct dex_device *dex) {
 	int reply = dex->buf_in[3];
 	int n_args = dex->count_in - 4;
 
@@ -263,7 +263,7 @@ int dex_read_cmd (struct dex_device *dex) {
 }
 #undef mkpair
 
-void dex_check_reply (struct dex_device *dex) {
+static void dex_check_reply (struct dex_device *dex) {
 	int ret;
 
 	PDEBUG("> dex_check_reply(%p)", dex);
@@ -279,7 +279,7 @@ void dex_check_reply (struct dex_device *dex) {
 	PDEBUG("< dex_check_reply");
 }
 
-int dex_do_cmd (struct dex_device *dex, int cmd) {
+static int dex_do_cmd (struct dex_device *dex, int cmd) {
 	PDEBUG("> dex_do_cmd(%p, %d", dex, cmd);
 
 	dex->request = cmd;
@@ -295,7 +295,8 @@ int dex_do_cmd (struct dex_device *dex, int cmd) {
 }
 
 
-int dex_transfer(struct dex_device *dex, unsigned int sector, unsigned int len,
+static int dex_transfer(struct dex_device *dex,
+			unsigned int sector, unsigned int len,
 			char *buffer, int write)
 {
 	int error = 0;
@@ -326,7 +327,7 @@ int dex_transfer(struct dex_device *dex, unsigned int sector, unsigned int len,
 
 /* tty functions */
 
-void dex_tty_write (struct dex_device *dex)
+static void dex_tty_write (struct dex_device *dex)
 {
 	int i;
 
@@ -346,8 +347,8 @@ void dex_tty_write (struct dex_device *dex)
 	}
 }
 
-void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
-			char *fp, int count) {
+static void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
+				char *fp, int count) {
 	struct dex_device *dex = tty->disc_data;
 	unsigned long flags;
 
@@ -368,7 +369,7 @@ void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 	PDEBUG("< dex_receive_buf");
 }
 
-void dex_write_wakeup (struct tty_struct *tty) {
+static void dex_write_wakeup (struct tty_struct *tty) {
 	struct dex_device *dex = tty->disc_data;
 	unsigned long flags;
 
@@ -434,10 +435,10 @@ int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
 }
 */
 
-int dex_make_request (struct request_queue *, struct bio *);
+static int dex_make_request (struct request_queue *, struct bio *);
 extern struct block_device_operations dex_bdops;
-int dex_thread (void *);
-int dex_tty_open (struct tty_struct *tty) {
+static int dex_thread (void *);
+static int dex_tty_open (struct tty_struct *tty) {
 	struct dex_device *tmp;
 
 	PDEBUG("> dex_tty_open(%p)", tty);
@@ -492,7 +493,7 @@ int dex_tty_open (struct tty_struct *tty) {
 	return 0;
 }
 
-void dex_tty_close (struct tty_struct *tty) {
+static void dex_tty_close (struct tty_struct *tty) {
 	struct dex_device *dex = tty->disc_data;
 
 	PDEBUG("> dex_tty_close(%p)", tty);
@@ -515,7 +516,7 @@ void dex_tty_close (struct tty_struct *tty) {
 	PDEBUG("< dex_tty_close");
 }
 
-struct tty_ldisc dex_ldisc = {
+static struct tty_ldisc dex_ldisc = {
 	.magic		= TTY_LDISC_MAGIC,
 	.owner		= THIS_MODULE,
 	.name		= DEX_NAME,
@@ -590,7 +591,7 @@ static struct bio *dex_get_bio(struct dex_device *dex)
 }
 
 
-int dex_make_request (struct request_queue *queue, struct bio *bio) {
+static int dex_make_request (struct request_queue *queue, struct bio *bio) {
 	struct dex_device *dex = queue->queuedata;
 
 	PDEBUG("> dex_make_request(%p, %p)", queue, bio);
@@ -605,7 +606,7 @@ int dex_make_request (struct request_queue *queue, struct bio *bio) {
 	return 0;
 }
 
-int dex_thread (void *data) {
+static int dex_thread (void *data) {
 	struct dex_device *dex = data;
 	struct bio *bio;
 
@@ -633,7 +634,7 @@ int dex_thread (void *data) {
 	return 0;
 }
 
-int dex_open (struct inode *inode, struct file *filp) {
+static int dex_open (struct inode *inode, struct file *filp) {
 	struct dex_device *dex;
 	unsigned long flags;
 
@@ -649,7 +650,7 @@ int dex_open (struct inode *inode, struct file *filp) {
 	return 0;
 }
 
-int dex_release (struct inode *inode, struct file *filp) {
+static int dex_release (struct inode *inode, struct file *filp) {
 	struct dex_device *dex;
 	unsigned long flags;
 
@@ -673,7 +674,7 @@ struct block_device_operations dex_bdops = {
 
 /* Module functions */
 
-void dex_cleanup (void) {
+static void dex_cleanup (void) {
 	PDEBUG("> dex_cleanup()");
 	if (tty_register_ldisc(DEX_LDISC, NULL) != 0) {
 		warn("can't unregister ldisc");
@@ -682,7 +683,7 @@ void dex_cleanup (void) {
 	PDEBUG("< dex_cleanup");
 }
 
-int dex_init (void) {
+static int dex_init (void) {
 	int tmp;
 
 	PDEBUG("> dex_init()");
