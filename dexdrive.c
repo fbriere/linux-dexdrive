@@ -584,6 +584,61 @@ static struct block_device_operations dex_bdops = {
 	.release		= dex_release,
 };
 
+/*
+ * Set up the block device half of the dex_device structure.
+ */
+static int dex_block_setup (struct dex_device *tmp)
+{
+	tmp->request_queue = blk_alloc_queue(GFP_KERNEL);
+	tmp->request_queue->queuedata = tmp;
+	blk_queue_make_request(tmp->request_queue, dex_make_request);
+
+	tmp->bio_head = tmp->bio_tail = NULL;
+
+	init_waitqueue_head(&tmp->thread_wait);
+	tmp->thread = kthread_run(dex_thread, tmp, "dexdrive%d", 0);
+
+	if (IS_ERR(tmp->thread)) {
+		warn("cannot create thread");
+		/* FIXME: We need to clean up here */
+	}
+
+	tmp->gd = alloc_disk(1);
+	if (! tmp->gd) {
+		warn("cannot allocate gendisk struct");
+		// We need to clean up our mess
+		return -1;
+	}
+	tmp->gd->major = major;
+	tmp->gd->first_minor = 0;
+	tmp->gd->fops = &dex_bdops;
+	tmp->gd->queue = tmp->request_queue;
+	tmp->gd->private_data = tmp;
+	snprintf(tmp->gd->disk_name, 32, "dexdrive%u", 0);
+	set_capacity(tmp->gd, 128 * 2);
+	add_disk(tmp->gd);
+
+	return 0;
+}
+
+/*
+ * Tear down the block device half of the dex_device structure.
+ */
+static void dex_block_teardown (struct dex_device *dex)
+{
+	// check for dex->open_count == 0
+
+	del_gendisk(dex->gd);
+	put_disk(dex->gd);
+
+	if (dex->request_queue)
+		blk_cleanup_queue(dex->request_queue);
+
+	kthread_stop(dex->thread);
+
+	/* FIXME: The thread could still be running here */
+}
+
 
 /* tty functions */
 
@@ -730,34 +785,8 @@ static int dex_tty_open (struct tty_struct *tty)
 	tty->disc_data = tmp;
 	tty->receive_room = DEX_BUFSIZE_IN;
 
-	tmp->request_queue = blk_alloc_queue(GFP_KERNEL);
-	tmp->request_queue->queuedata = tmp;
-	blk_queue_make_request(tmp->request_queue, dex_make_request);
-
-	tmp->bio_head = tmp->bio_tail = NULL;
-
-	init_waitqueue_head(&tmp->thread_wait);
-	tmp->thread = kthread_run(dex_thread, tmp, "dexdrive%d", 0);
-
-	if (IS_ERR(tmp->thread)) {
-		warn("cannot create thread");
-		/* FIXME: We need to clean up here */
-	}
-
-	tmp->gd = alloc_disk(1);
-	if (! tmp->gd) {
-		warn("cannot allocate gendisk struct");
-		// We need to clean up our mess
-		return -1;
-	}
-	tmp->gd->major = major;
-	tmp->gd->first_minor = 0;
-	tmp->gd->fops = &dex_bdops;
-	tmp->gd->queue = tmp->request_queue;
-	tmp->gd->private_data = tmp;
-	snprintf(tmp->gd->disk_name, 32, "dexdrive%u", 0);
-	set_capacity(tmp->gd, 128 * 2);
-	add_disk(tmp->gd);
+	/* FIXME: Check return status */
+	dex_block_setup(tmp);
 
 	PDEBUG("< dex_tty_open := %d", 0);
 	return 0;
@@ -772,19 +801,10 @@ static void dex_tty_close (struct tty_struct *tty)
 
 	PDEBUG("> dex_tty_close(%p)", tty);
 
-	// check for dex->open_count == 0
-
 	tty->disc_data = NULL;
 
-	del_gendisk(dex->gd);
-	put_disk(dex->gd);
+	dex_block_teardown(dex);
 
-	if (dex->request_queue)
-		blk_cleanup_queue(dex->request_queue);
-
-	kthread_stop(dex->thread);
-
-	/* FIXME: The thread could still be running here */
 	kfree(dex);
 
 	PDEBUG("< dex_tty_close");
