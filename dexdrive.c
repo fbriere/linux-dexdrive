@@ -352,6 +352,12 @@ static int dex_do_cmd (struct dex_device *dex, int cmd)
 		return -EBUSY;
 	}
 
+	if (!dex->tty) {
+		spin_unlock_irqrestore(&dex->lock, flags);
+		warn("No tty");
+		return -EIO;
+	}
+
 	dex->request = cmd;
 	dex->request_return = -EIO;
 
@@ -650,7 +656,8 @@ static void dex_tty_write (struct dex_device *dex)
 {
 	int i;
 
-	if (dex->count_out > 0) {
+	/* dex->tty should always be defined here, but better safe than sorry */
+	if (dex->tty && dex->count_out > 0) {
 		PDEBUG("writing %d bytes to device", dex->count_out);
 
 		i = dex->tty->ops->write(dex->tty, dex->ptr_out, dex->count_out);
@@ -798,10 +805,13 @@ static int dex_tty_open (struct tty_struct *tty)
 static void dex_tty_close (struct tty_struct *tty)
 {
 	struct dex_device *dex = tty->disc_data;
+	unsigned long flags;
 
 	PDEBUG("> dex_tty_close(%p)", tty);
 
+	spin_lock_irqsave(&dex->lock, flags);
 	tty->disc_data = NULL;
+	spin_unlock_irqrestore(&dex->lock, flags);
 
 	dex_block_teardown(dex);
 
