@@ -379,8 +379,6 @@ static int dex_do_cmd (struct dex_device *dex, int cmd)
 	wait_for_completion_interruptible_timeout(&dex->request_done,
 								DEX_TIMEOUTJ);
 
-	/* FIXME: There's no guarantee that dex still exists at this point */
-
 	/* This will not have been cleared on timeout */
 	dex->request = DEX_REQ_NONE;
 
