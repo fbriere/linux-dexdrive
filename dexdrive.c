@@ -550,20 +550,66 @@ static int dex_thread (void *data)
 }
 
 /*
+ * Record that we are now using this device.
+ */
+static int dex_get (struct dex_device *dex)
+{
+	unsigned long flags;
+	int ret = 0;
+
+	PDEBUG("> dex_get(%p)", dex);
+
+	spin_lock_irqsave(&dex->lock, flags);
+
+	if (dex->tty)
+		dex->open_count++;
+	else
+		ret = -ENXIO;
+
+	spin_unlock_irqrestore(&dex->lock, flags);
+
+	PDEBUG("< dex_get := %d", ret);
+
+	return ret;
+}
+
+/*
+ * Record that we are no longer using this device.  If it is no longer used,
+ * then it will be destroyed.
+ */
+static void dex_block_teardown (struct dex_device *dex);
+static void dex_put (struct dex_device *dex)
+{
+	unsigned long flags;
+	int tmp;
+
+	PDEBUG("> dex_put(%p)", dex);
+
+	spin_lock_irqsave(&dex->lock, flags);
+	tmp = --dex->open_count;
+	spin_unlock_irqrestore(&dex->lock, flags);
+
+	if (tmp == 0) {
+		dex_block_teardown(dex);
+		kfree(dex);
+	}
+
+	PDEBUG("< dex_put");
+}
+
+/*
  * Called when our block device is opened.
  */
 static int dex_open (struct inode *inode, struct file *filp)
 {
 	struct dex_device *dex;
-	unsigned long flags;
 
 	PDEBUG("> dex_open(%p, %p)", inode, filp);
 
 	dex = inode->i_bdev->bd_disk->private_data;
 
-	spin_lock_irqsave(&dex->lock, flags);
-	dex->open_count++;
-	spin_unlock_irqrestore(&dex->lock, flags);
+	if (dex_get(dex) != 0)
+		return -ENXIO;
 
 	PDEBUG("< dex_open := %d", 0);
 	return 0;
@@ -575,14 +621,12 @@ static int dex_open (struct inode *inode, struct file *filp)
 static int dex_release (struct inode *inode, struct file *filp)
 {
 	struct dex_device *dex;
-	unsigned long flags;
 
 	PDEBUG("> dex_release(%p, %p)", inode, filp);
 
 	dex = inode->i_bdev->bd_disk->private_data;
-	spin_lock_irqsave(&dex->lock, flags);
-	dex->open_count--;
-	spin_unlock_irqrestore(&dex->lock, flags);
+
+	dex_put(dex);
 
 	PDEBUG("< dex_release := %d", 0);
 	return 0;
@@ -683,8 +727,6 @@ static void dex_block_teardown (struct dex_device *dex)
 	spin_unlock_irqrestore(&dex->lock, flags);
 
 	kthread_stop(dex->thread);
-
-	/* FIXME: check for dex->open_count == 0 */
 
 	put_disk(dex->gd);
 
@@ -833,7 +875,7 @@ static int dex_tty_open (struct tty_struct *tty)
 	spin_lock_init(&dex->lock);
 
 	dex->tty = tty;
-	dex->open_count = 0;
+	dex->open_count = 1;
 	dex->request = DEX_REQ_NONE;
 	dex->media_changed = 0;
 	dex->minor = -1;
@@ -861,12 +903,11 @@ static void dex_tty_close (struct tty_struct *tty)
 	PDEBUG("> dex_tty_close(%p)", tty);
 
 	spin_lock_irqsave(&dex->lock, flags);
+	dex->tty = NULL;
 	tty->disc_data = NULL;
 	spin_unlock_irqrestore(&dex->lock, flags);
 
-	dex_block_teardown(dex);
-
-	kfree(dex);
+	dex_put(dex);
 
 	PDEBUG("< dex_tty_close");
 }
