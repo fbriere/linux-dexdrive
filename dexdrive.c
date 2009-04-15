@@ -587,36 +587,36 @@ static struct block_device_operations dex_bdops = {
 /*
  * Set up the block device half of the dex_device structure.
  */
-static int dex_block_setup (struct dex_device *tmp)
+static int dex_block_setup (struct dex_device *dex)
 {
-	tmp->request_queue = blk_alloc_queue(GFP_KERNEL);
-	tmp->request_queue->queuedata = tmp;
-	blk_queue_make_request(tmp->request_queue, dex_make_request);
+	dex->request_queue = blk_alloc_queue(GFP_KERNEL);
+	dex->request_queue->queuedata = dex;
+	blk_queue_make_request(dex->request_queue, dex_make_request);
 
-	tmp->bio_head = tmp->bio_tail = NULL;
+	dex->bio_head = dex->bio_tail = NULL;
 
-	init_waitqueue_head(&tmp->thread_wait);
-	tmp->thread = kthread_run(dex_thread, tmp, "dexdrive%d", 0);
+	init_waitqueue_head(&dex->thread_wait);
+	dex->thread = kthread_run(dex_thread, dex, "dexdrive%d", 0);
 
-	if (IS_ERR(tmp->thread)) {
+	if (IS_ERR(dex->thread)) {
 		warn("cannot create thread");
 		/* FIXME: We need to clean up here */
 	}
 
-	tmp->gd = alloc_disk(1);
-	if (! tmp->gd) {
+	dex->gd = alloc_disk(1);
+	if (! dex->gd) {
 		warn("cannot allocate gendisk struct");
 		// We need to clean up our mess
 		return -1;
 	}
-	tmp->gd->major = major;
-	tmp->gd->first_minor = 0;
-	tmp->gd->fops = &dex_bdops;
-	tmp->gd->queue = tmp->request_queue;
-	tmp->gd->private_data = tmp;
-	snprintf(tmp->gd->disk_name, 32, "dexdrive%u", 0);
-	set_capacity(tmp->gd, 128 * 2);
-	add_disk(tmp->gd);
+	dex->gd->major = major;
+	dex->gd->first_minor = 0;
+	dex->gd->fops = &dex_bdops;
+	dex->gd->queue = dex->request_queue;
+	dex->gd->private_data = dex;
+	snprintf(dex->gd->disk_name, 32, "dexdrive%u", 0);
+	set_capacity(dex->gd, 128 * 2);
+	add_disk(dex->gd);
 
 	return 0;
 }
@@ -764,29 +764,29 @@ int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
  */
 static int dex_tty_open (struct tty_struct *tty)
 {
-	struct dex_device *tmp;
+	struct dex_device *dex;
 
 	PDEBUG("> dex_tty_open(%p)", tty);
 
-	if((tmp = kmalloc(sizeof(struct dex_device), GFP_KERNEL)) == NULL) {
+	if((dex = kmalloc(sizeof(struct dex_device), GFP_KERNEL)) == NULL) {
 		warn("cannot allocate device struct");
 		return -ENOMEM;
 	}
 
-	spin_lock_init(&tmp->lock);
-	init_waitqueue_head(&tmp->request_wait);
+	spin_lock_init(&dex->lock);
+	init_waitqueue_head(&dex->request_wait);
 
-	tmp->tty = tty;
-	tmp->open_count = 0;
-	tmp->request = DEX_REQ_NONE;
-	tmp->media_change = 0;
-	tmp->minor = -1;
+	dex->tty = tty;
+	dex->open_count = 0;
+	dex->request = DEX_REQ_NONE;
+	dex->media_change = 0;
+	dex->minor = -1;
 
-	tty->disc_data = tmp;
+	tty->disc_data = dex;
 	tty->receive_room = DEX_BUFSIZE_IN;
 
 	/* FIXME: Check return status */
-	dex_block_setup(tmp);
+	dex_block_setup(dex);
 
 	PDEBUG("< dex_tty_open := %d", 0);
 	return 0;
