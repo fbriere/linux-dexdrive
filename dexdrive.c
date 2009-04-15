@@ -538,7 +538,7 @@ int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
  * We create and setup a new dex_device.
  */
 static int dex_make_request (struct request_queue *, struct bio *);
-extern struct block_device_operations dex_bdops;
+static struct block_device_operations dex_bdops;
 static int dex_thread (void *);
 static int dex_tty_open (struct tty_struct *tty)
 {
@@ -798,7 +798,7 @@ static int dex_release (struct inode *inode, struct file *filp)
 	return 0;
 }
 
-struct block_device_operations dex_bdops = {
+static struct block_device_operations dex_bdops = {
 	.owner			= THIS_MODULE,
 	.open			= dex_open,
 	.release		= dex_release,
