@@ -122,8 +122,8 @@ struct dex_device {
 	/* pointer to the next byte to be written */
 	char *ptr_out;
 
-	int media_present;
-	int media_change;
+	/* media change detected, waiting to be reported via media_changed() */
+	int media_changed;
 	int minor;
 
 	/* Disk device we have created */
@@ -282,6 +282,7 @@ static int dex_read_cmd (struct dex_device *dex)
 			return 1;
 		case mkpair(DEX_REQ_READ, DEX_CMD_OK):
 		case mkpair(DEX_REQ_WRITE, DEX_CMD_OK):
+			dex->media_changed = 1;
 			return -EIO;
 		case mkpair(DEX_REQ_INIT, DEX_CMD_ID):
 			if (n_args < 5) return 0;
@@ -291,14 +292,10 @@ static int dex_read_cmd (struct dex_device *dex)
 		case mkpair(DEX_REQ_OFF, DEX_CMD_OK):
 			return 1;
 		case mkpair(DEX_REQ_STATUS, DEX_CMD_OK):
-			dex->media_change = 1;
-			dex->media_present = 0;
+			dex->media_changed = 1;
 			return 1;
 		case mkpair(DEX_REQ_STATUS, DEX_CMD_OKCARD):
 			if (n_args < 1) return 0;
-			dex->media_present = 1;
-			/* TODO: Should autodetect or something */
-			//blk_size[major][dex->minor] = 128 * 1024;
 			return 1;
 		default:
 			PDEBUG("got unknown reply %i from device", reply);
@@ -585,10 +582,29 @@ static int dex_release (struct inode *inode, struct file *filp)
 	return 0;
 }
 
+static int dex_media_changed (struct gendisk *gd)
+{
+	struct dex_device *dex = gd->private_data;
+	unsigned long flags;
+	int tmp;
+
+	PDEBUG("> dex_media_changed(%p)", gd);
+
+	spin_lock_irqsave(&dex->lock, flags);
+	tmp = dex->media_changed;
+	dex->media_changed = 0;
+	spin_unlock_irqrestore(&dex->lock, flags);
+
+	PDEBUG("< dex_media_changed := %d", tmp);
+
+	return tmp;
+}
+
 static struct block_device_operations dex_bdops = {
 	.owner			= THIS_MODULE,
 	.open			= dex_open,
 	.release		= dex_release,
+	.media_changed		= dex_media_changed,
 };
 
 /*
@@ -626,6 +642,7 @@ static int dex_block_setup (struct dex_device *dex)
 	dex->gd->first_minor = 0;
 	dex->gd->fops = &dex_bdops;
 	dex->gd->queue = dex->request_queue;
+	dex->gd->flags |= GENHD_FL_REMOVABLE;
 	dex->gd->private_data = dex;
 	snprintf(dex->gd->disk_name, 32, "dexdrive%u", 0);
 	set_capacity(dex->gd, 128 * 2);
@@ -800,7 +817,7 @@ static int dex_tty_open (struct tty_struct *tty)
 	dex->tty = tty;
 	dex->open_count = 0;
 	dex->request = DEX_REQ_NONE;
-	dex->media_change = 0;
+	dex->media_changed = 0;
 	dex->minor = -1;
 
 	tty->disc_data = dex;
