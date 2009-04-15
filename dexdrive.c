@@ -40,7 +40,6 @@
 #define DEX_BUFSIZE_OUT	1024		/* Size of output buffer (min. 137) */
 #define DEX_BUFSIZE_IN	1024		/* Size of input buffer (min. 208) */
 #define DEX_TIMEOUT	100		/* Timeout in msecs when waiting */
-#define DEX_TIMEOUTJ	(DEX_TIMEOUT * HZ / 1000)	/* Equivalent in jiffies */
 /* #define DEX_IOC_MAGIC	0xfb */
 
 /* Line discipline number -- must be hijacked from include/linux/tty.h */
@@ -377,7 +376,7 @@ static int dex_do_cmd (struct dex_device *dex, int cmd)
 	spin_unlock_irqrestore(&dex->lock, flags);
 
 	wait_for_completion_interruptible_timeout(&dex->request_done,
-								DEX_TIMEOUTJ);
+						msecs_to_jiffies(DEX_TIMEOUT));
 
 	/* This will not have been cleared on timeout */
 	dex->request = DEX_REQ_NONE;
