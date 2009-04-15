@@ -643,8 +643,6 @@ static void dex_block_teardown (struct dex_device *dex)
 		blk_cleanup_queue(dex->request_queue);
 
 	kthread_stop(dex->thread);
-
-	/* FIXME: The thread could still be running here */
 }
 
 
