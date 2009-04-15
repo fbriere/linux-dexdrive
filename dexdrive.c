@@ -298,7 +298,7 @@ static int dex_read_cmd (struct dex_device *dex)
 		case mkpair(DEX_REQ_STATUS, DEX_CMD_OKCARD):
 			if (n_args < 1) return 0;
 			dex->media_present = 1;
-			// Should autodetect or something
+			/* TODO: Should autodetect or something */
 			//blk_size[major][dex->minor] = 128 * 1024;
 			return 1;
 		default:
@@ -597,7 +597,12 @@ static struct block_device_operations dex_bdops = {
  */
 static int dex_block_setup (struct dex_device *dex)
 {
+	int ret;
+
 	dex->request_queue = blk_alloc_queue(GFP_KERNEL);
+	if (!dex->request_queue)
+		return -ENOMEM;
+
 	dex->request_queue->queuedata = dex;
 	blk_queue_make_request(dex->request_queue, dex_make_request);
 
@@ -608,14 +613,15 @@ static int dex_block_setup (struct dex_device *dex)
 
 	if (IS_ERR(dex->thread)) {
 		warn("cannot create thread");
-		/* FIXME: We need to clean up here */
+		ret = PTR_ERR(dex->thread);
+		goto err;
 	}
 
 	dex->gd = alloc_disk(1);
 	if (! dex->gd) {
 		warn("cannot allocate gendisk struct");
-		// We need to clean up our mess
-		return -1;
+		ret = -ENOMEM;
+		goto err;
 	}
 	dex->gd->major = major;
 	dex->gd->first_minor = 0;
@@ -627,6 +633,15 @@ static int dex_block_setup (struct dex_device *dex)
 	add_disk(dex->gd);
 
 	return 0;
+
+err:
+	if (!IS_ERR(dex->thread))
+		kthread_stop(dex->thread);
+
+	if (dex->request_queue)
+		blk_cleanup_queue(dex->request_queue);
+
+	return ret;
 }
 
 /*
@@ -634,7 +649,7 @@ static int dex_block_setup (struct dex_device *dex)
  */
 static void dex_block_teardown (struct dex_device *dex)
 {
-	// check for dex->open_count == 0
+	/* FIXME: check for dex->open_count == 0 */
 
 	del_gendisk(dex->gd);
 	put_disk(dex->gd);
@@ -772,6 +787,7 @@ int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
 static int dex_tty_open (struct tty_struct *tty)
 {
 	struct dex_device *dex;
+	int ret;
 
 	PDEBUG("> dex_tty_open(%p)", tty);
 
@@ -791,8 +807,10 @@ static int dex_tty_open (struct tty_struct *tty)
 	tty->disc_data = dex;
 	tty->receive_room = DEX_BUFSIZE_IN;
 
-	/* FIXME: Check return status */
-	dex_block_setup(dex);
+	if ((ret = dex_block_setup(dex)) < 0) {
+		kfree(dex);
+		return ret;
+	}
 
 	PDEBUG("< dex_tty_open := %d", 0);
 	return 0;
