@@ -22,6 +22,7 @@
 #include <linux/init.h>
 
 #include <linux/kernel.h>
+#include <linux/completion.h>
 #include <linux/kthread.h>
 #include <linux/slab.h>		/* kmalloc() */
 #include <linux/string.h>	/* memcpy() */
@@ -111,8 +112,8 @@ struct dex_device {
 	/* arguments provided with the request */
 	int request_n;
 	void *request_ptr;
-	/* wait queue to wake up when request is completed */
-	wait_queue_head_t request_wait;
+	/* request is completed */
+	struct completion request_done;
 	/* return value of request */
 	int request_return;
 	/* input and output buffers */
@@ -327,7 +328,7 @@ static void dex_check_reply (struct dex_device *dex)
 	if (ret != 0) {
 		dex->request = DEX_REQ_NONE;
 		dex->request_return = ret < 0 ? ret : 0;
-		wake_up_interruptible(&dex->request_wait);
+		complete(&dex->request_done);
 	}
 
 	PDEBUG("< dex_check_reply");
@@ -372,10 +373,11 @@ static int dex_do_cmd (struct dex_device *dex, int cmd)
 
 	dex_tty_write(dex);
 
+	init_completion(&dex->request_done);
 	spin_unlock_irqrestore(&dex->lock, flags);
 
-	/* FIXME: Race condition here -- wake_up may have already been called */
-	interruptible_sleep_on_timeout(&dex->request_wait, DEX_TIMEOUTJ);
+	wait_for_completion_interruptible_timeout(&dex->request_done,
+								DEX_TIMEOUTJ);
 
 	/* FIXME: There's no guarantee that dex still exists at this point */
 
@@ -781,7 +783,6 @@ static int dex_tty_open (struct tty_struct *tty)
 	}
 
 	spin_lock_init(&dex->lock);
-	init_waitqueue_head(&dex->request_wait);
 
 	dex->tty = tty;
 	dex->open_count = 0;
