@@ -501,13 +501,14 @@ static struct bio *dex_get_bio(struct dex_device *dex)
 static int dex_make_request (struct request_queue *queue, struct bio *bio)
 {
 	struct dex_device *dex = queue->queuedata;
+	unsigned long flags;
 
 	PDEBUG("> dex_make_request(%p, %p)", queue, bio);
 
-	spin_lock_irq(&dex->lock);
+	spin_lock_irqsave(&dex->lock, flags);
 	dex_add_bio(dex, bio);
 	wake_up(&dex->thread_wait);
-	spin_unlock_irq(&dex->lock);
+	spin_unlock_irqrestore(&dex->lock, flags);
 
 	PDEBUG("< dex_make_request");
 
@@ -522,6 +523,7 @@ static int dex_thread (void *data)
 {
 	struct dex_device *dex = data;
 	struct bio *bio;
+	unsigned long flags;
 
 	PDEBUG(">> dex_thread starting");
 
@@ -535,9 +537,9 @@ static int dex_thread (void *data)
 		if (! dex->bio_head)
 			continue;
 
-		spin_lock_irq(&dex->lock);
+		spin_lock_irqsave(&dex->lock, flags);
 		bio = dex_get_bio(dex);
-		spin_unlock_irq(&dex->lock);
+		spin_unlock_irqrestore(&dex->lock, flags);
 
 		dex_handle_bio(dex, bio);
 	}
