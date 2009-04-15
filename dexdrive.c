@@ -499,6 +499,12 @@ static int dex_make_request (struct request_queue *queue, struct bio *bio)
 
 	PDEBUG("> dex_make_request(%p, %p)", queue, bio);
 
+	if (!dex) {
+		/* We are shutting down -- drop everything on the floor */
+		bio_io_error(bio);
+		return 0;
+	}
+
 	spin_lock_irqsave(&dex->lock, flags);
 	dex_add_bio(dex, bio);
 	wake_up(&dex->thread_wait);
@@ -665,15 +671,27 @@ err:
  */
 static void dex_block_teardown (struct dex_device *dex)
 {
-	/* FIXME: check for dex->open_count == 0 */
+	unsigned long flags;
+
+	PDEBUG("> dex_block_teardown(%p)", dex);
 
 	del_gendisk(dex->gd);
+
+	/* Tell dex_make_request() to refuse any new bio's */
+	spin_lock_irqsave(&dex->lock, flags);
+	dex->request_queue->queuedata = NULL;
+	spin_unlock_irqrestore(&dex->lock, flags);
+
+	kthread_stop(dex->thread);
+
+	/* FIXME: check for dex->open_count == 0 */
+
 	put_disk(dex->gd);
 
 	if (dex->request_queue)
 		blk_cleanup_queue(dex->request_queue);
 
-	kthread_stop(dex->thread);
+	PDEBUG("< dex_block_teardown");
 }
 
 
