@@ -415,226 +415,6 @@ static int dex_transfer(struct dex_device *dex,
 }
 
 
-/* tty functions */
-
-/*
- * Send as much of our buffer as possible to the tty driver.  This should be
- * called while holding the spinlock.
- */
-static void dex_tty_write (struct dex_device *dex)
-{
-	int i;
-
-	if (dex->count_out > 0) {
-		PDEBUG("writing %d bytes to device", dex->count_out);
-
-		i = dex->tty->ops->write(dex->tty, dex->ptr_out, dex->count_out);
-		dex->ptr_out += i;
-		dex->count_out -= i;
-
-		PDEBUG("(%d bytes were written)", i);
-
-		if (dex->count_out > 0)
-			set_bit(TTY_DO_WRITE_WAKEUP, &dex->tty->flags);
-		else
-			clear_bit(TTY_DO_WRITE_WAKEUP, &dex->tty->flags);
-	}
-}
-
-/* Called by the tty driver when data is coming in */
-static void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
-				char *fp, int count)
-{
-	struct dex_device *dex = tty->disc_data;
-	unsigned long flags;
-
-	PDEBUG("> dex_receive_buf(%p, %p, %p, %u)", tty, buf, fp, count);
-
-	spin_lock_irqsave(&dex->lock, flags);
-	if(dex->request) {
-		if (count > DEX_BUFSIZE_IN - dex->count_in) {
-			warn("Input buffer overflowing");
-			count = DEX_BUFSIZE_IN - dex->count_in;
-		}
-		memcpy(dex->buf_in + dex->count_in, buf, count);
-		dex->count_in += count;
-		dex_check_reply(dex);
-	}
-	spin_unlock_irqrestore(&dex->lock, flags);
-
-	PDEBUG("< dex_receive_buf");
-}
-
-/* Called by the tty driver when there's room for sending more data */
-static void dex_write_wakeup (struct tty_struct *tty)
-{
-	struct dex_device *dex = tty->disc_data;
-	unsigned long flags;
-
-	PDEBUG("> dex_write_wakeup(%p)", tty);
-
-	spin_lock_irqsave(&dex->lock, flags);
-	dex_tty_write(dex);
-	spin_unlock_irqrestore(&dex->lock, flags);
-
-	PDEBUG("< dex_write_wakeup");
-}
-
-/*
-int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
-		unsigned int cmd, unsigned long arg) {
-	struct dex_device *dex = tty->disc_data;
-	unsigned long flags;
-	int ret, minor=0;
-
-	PDEBUG("> dex_tty_ioctl(%p, %p, %u, %lu)", tty, filp, cmd, arg);
-
-	if (_IOC_TYPE(cmd) != DEX_IOC_MAGIC) return -ENOTTY;
-
-	if ((_IOC_DIR(cmd) & _IOC_READ) &&
-		!access_ok(VERIFY_WRITE, arg, _IOC_SIZE(cmd)))
-		return -EFAULT;
-	if ((_IOC_DIR(cmd) & _IOC_WRITE) &&
-		!access_ok(VERIFY_READ, arg, _IOC_SIZE(cmd)))
-		return -EFAULT;
-
-	spin_lock_irqsave(&dex->lock, flags);
-
-	switch (cmd) {
-		case DEX_IOCGMAJOR:
-			ret = __put_user(major, (int *)arg);
-			break;
-		case DEX_IOCGMINOR:
-			ret = dex->minor >= 0 ?
-				__put_user(dex->minor, (int *)arg) :
-				-EIO;
-			break;
-		case DEX_IOCSMINOR:
-			ret = dex->minor < 0 ?
-				__get_user(minor, (int *)arg) :
-				-EIO;
-			if (ret == 0) {
-				if (dex_devices[minor] == NULL) {
-					dex->minor = minor;
-					dex_devices[minor] = dex;
-				} else {
-					ret = -EBUSY;
-				}
-			}
-			break;
-		default:
-			ret = -ENOTTY;
-	}
-
-	spin_unlock_irqrestore(&dex->lock, flags);
-
-	PDEBUG("< dex_tty_ioctl := %d", ret);
-	return ret;
-}
-*/
-
-/*
- * Called by the tty driver when associating a tty with our line discipline.
- * We create and setup a new dex_device.
- */
-static int dex_make_request (struct request_queue *, struct bio *);
-static struct block_device_operations dex_bdops;
-static int dex_thread (void *);
-static int dex_tty_open (struct tty_struct *tty)
-{
-	struct dex_device *tmp;
-
-	PDEBUG("> dex_tty_open(%p)", tty);
-
-	if((tmp = kmalloc(sizeof(struct dex_device), GFP_KERNEL)) == NULL) {
-		warn("cannot allocate device struct");
-		return -ENOMEM;
-	}
-
-	spin_lock_init(&tmp->lock);
-	init_waitqueue_head(&tmp->request_wait);
-
-	tmp->tty = tty;
-	tmp->open_count = 0;
-	tmp->request = DEX_REQ_NONE;
-	tmp->media_change = 0;
-	tmp->minor = -1;
-
-	tty->disc_data = tmp;
-	tty->receive_room = DEX_BUFSIZE_IN;
-
-	tmp->request_queue = blk_alloc_queue(GFP_KERNEL);
-	tmp->request_queue->queuedata = tmp;
-	blk_queue_make_request(tmp->request_queue, dex_make_request);
-
-	tmp->bio_head = tmp->bio_tail = NULL;
-
-	init_waitqueue_head(&tmp->thread_wait);
-	tmp->thread = kthread_run(dex_thread, tmp, "dexdrive%d", 0);
-
-	if (IS_ERR(tmp->thread)) {
-		warn("cannot create thread");
-		/* FIXME: We need to clean up here */
-	}
-
-	tmp->gd = alloc_disk(1);
-	if (! tmp->gd) {
-		warn("cannot allocate gendisk struct");
-		// We need to clean up our mess
-		return -1;
-	}
-	tmp->gd->major = major;
-	tmp->gd->first_minor = 0;
-	tmp->gd->fops = &dex_bdops;
-	tmp->gd->queue = tmp->request_queue;
-	tmp->gd->private_data = tmp;
-	snprintf(tmp->gd->disk_name, 32, "dexdrive%u", 0);
-	set_capacity(tmp->gd, 128 * 2);
-	add_disk(tmp->gd);
-
-	PDEBUG("< dex_tty_open := %d", 0);
-	return 0;
-}
-
-/*
- * Called by the tty driver when our line discipline is torn down.
- */
-static void dex_tty_close (struct tty_struct *tty)
-{
-	struct dex_device *dex = tty->disc_data;
-
-	PDEBUG("> dex_tty_close(%p)", tty);
-
-	// check for dex->open_count == 0
-
-	tty->disc_data = NULL;
-
-	del_gendisk(dex->gd);
-	put_disk(dex->gd);
-
-	if (dex->request_queue)
-		blk_cleanup_queue(dex->request_queue);
-
-	kthread_stop(dex->thread);
-
-	/* FIXME: The thread could still be running here */
-	kfree(dex);
-
-	PDEBUG("< dex_tty_close");
-}
-
-static struct tty_ldisc dex_ldisc = {
-	.magic		= TTY_LDISC_MAGIC,
-	.owner		= THIS_MODULE,
-	.name		= DEX_NAME,
-	.open		= dex_tty_open,
-	.close		= dex_tty_close,
-	/* .ioctl	= dex_tty_ioctl, */
-	.receive_buf	= dex_receive_buf,
-	.write_wakeup	= dex_write_wakeup,
-};
-
-
 /* Block device functions */
 
 /*
@@ -646,7 +426,7 @@ static inline void dex_handle_bio(struct dex_device *dex, struct bio *bio)
 	struct bio_vec *bvec;
 	int i;
 	int error = 0;
-	
+
 	PDEBUG(">> dex_handle_bio(%p, %p)", dex, bio);
 
 	sector = bio->bi_sector << 2;
@@ -802,6 +582,223 @@ static struct block_device_operations dex_bdops = {
 	.owner			= THIS_MODULE,
 	.open			= dex_open,
 	.release		= dex_release,
+};
+
+
+/* tty functions */
+
+/*
+ * Send as much of our buffer as possible to the tty driver.  This should be
+ * called while holding the spinlock.
+ */
+static void dex_tty_write (struct dex_device *dex)
+{
+	int i;
+
+	if (dex->count_out > 0) {
+		PDEBUG("writing %d bytes to device", dex->count_out);
+
+		i = dex->tty->ops->write(dex->tty, dex->ptr_out, dex->count_out);
+		dex->ptr_out += i;
+		dex->count_out -= i;
+
+		PDEBUG("(%d bytes were written)", i);
+
+		if (dex->count_out > 0)
+			set_bit(TTY_DO_WRITE_WAKEUP, &dex->tty->flags);
+		else
+			clear_bit(TTY_DO_WRITE_WAKEUP, &dex->tty->flags);
+	}
+}
+
+/* Called by the tty driver when data is coming in */
+static void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
+				char *fp, int count)
+{
+	struct dex_device *dex = tty->disc_data;
+	unsigned long flags;
+
+	PDEBUG("> dex_receive_buf(%p, %p, %p, %u)", tty, buf, fp, count);
+
+	spin_lock_irqsave(&dex->lock, flags);
+	if(dex->request) {
+		if (count > DEX_BUFSIZE_IN - dex->count_in) {
+			warn("Input buffer overflowing");
+			count = DEX_BUFSIZE_IN - dex->count_in;
+		}
+		memcpy(dex->buf_in + dex->count_in, buf, count);
+		dex->count_in += count;
+		dex_check_reply(dex);
+	}
+	spin_unlock_irqrestore(&dex->lock, flags);
+
+	PDEBUG("< dex_receive_buf");
+}
+
+/* Called by the tty driver when there's room for sending more data */
+static void dex_write_wakeup (struct tty_struct *tty)
+{
+	struct dex_device *dex = tty->disc_data;
+	unsigned long flags;
+
+	PDEBUG("> dex_write_wakeup(%p)", tty);
+
+	spin_lock_irqsave(&dex->lock, flags);
+	dex_tty_write(dex);
+	spin_unlock_irqrestore(&dex->lock, flags);
+
+	PDEBUG("< dex_write_wakeup");
+}
+
+/*
+int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
+		unsigned int cmd, unsigned long arg) {
+	struct dex_device *dex = tty->disc_data;
+	unsigned long flags;
+	int ret, minor=0;
+
+	PDEBUG("> dex_tty_ioctl(%p, %p, %u, %lu)", tty, filp, cmd, arg);
+
+	if (_IOC_TYPE(cmd) != DEX_IOC_MAGIC) return -ENOTTY;
+
+	if ((_IOC_DIR(cmd) & _IOC_READ) &&
+		!access_ok(VERIFY_WRITE, arg, _IOC_SIZE(cmd)))
+		return -EFAULT;
+	if ((_IOC_DIR(cmd) & _IOC_WRITE) &&
+		!access_ok(VERIFY_READ, arg, _IOC_SIZE(cmd)))
+		return -EFAULT;
+
+	spin_lock_irqsave(&dex->lock, flags);
+
+	switch (cmd) {
+		case DEX_IOCGMAJOR:
+			ret = __put_user(major, (int *)arg);
+			break;
+		case DEX_IOCGMINOR:
+			ret = dex->minor >= 0 ?
+				__put_user(dex->minor, (int *)arg) :
+				-EIO;
+			break;
+		case DEX_IOCSMINOR:
+			ret = dex->minor < 0 ?
+				__get_user(minor, (int *)arg) :
+				-EIO;
+			if (ret == 0) {
+				if (dex_devices[minor] == NULL) {
+					dex->minor = minor;
+					dex_devices[minor] = dex;
+				} else {
+					ret = -EBUSY;
+				}
+			}
+			break;
+		default:
+			ret = -ENOTTY;
+	}
+
+	spin_unlock_irqrestore(&dex->lock, flags);
+
+	PDEBUG("< dex_tty_ioctl := %d", ret);
+	return ret;
+}
+*/
+
+/*
+ * Called by the tty driver when associating a tty with our line discipline.
+ * We create and setup a new dex_device.
+ */
+static int dex_tty_open (struct tty_struct *tty)
+{
+	struct dex_device *tmp;
+
+	PDEBUG("> dex_tty_open(%p)", tty);
+
+	if((tmp = kmalloc(sizeof(struct dex_device), GFP_KERNEL)) == NULL) {
+		warn("cannot allocate device struct");
+		return -ENOMEM;
+	}
+
+	spin_lock_init(&tmp->lock);
+	init_waitqueue_head(&tmp->request_wait);
+
+	tmp->tty = tty;
+	tmp->open_count = 0;
+	tmp->request = DEX_REQ_NONE;
+	tmp->media_change = 0;
+	tmp->minor = -1;
+
+	tty->disc_data = tmp;
+	tty->receive_room = DEX_BUFSIZE_IN;
+
+	tmp->request_queue = blk_alloc_queue(GFP_KERNEL);
+	tmp->request_queue->queuedata = tmp;
+	blk_queue_make_request(tmp->request_queue, dex_make_request);
+
+	tmp->bio_head = tmp->bio_tail = NULL;
+
+	init_waitqueue_head(&tmp->thread_wait);
+	tmp->thread = kthread_run(dex_thread, tmp, "dexdrive%d", 0);
+
+	if (IS_ERR(tmp->thread)) {
+		warn("cannot create thread");
+		/* FIXME: We need to clean up here */
+	}
+
+	tmp->gd = alloc_disk(1);
+	if (! tmp->gd) {
+		warn("cannot allocate gendisk struct");
+		// We need to clean up our mess
+		return -1;
+	}
+	tmp->gd->major = major;
+	tmp->gd->first_minor = 0;
+	tmp->gd->fops = &dex_bdops;
+	tmp->gd->queue = tmp->request_queue;
+	tmp->gd->private_data = tmp;
+	snprintf(tmp->gd->disk_name, 32, "dexdrive%u", 0);
+	set_capacity(tmp->gd, 128 * 2);
+	add_disk(tmp->gd);
+
+	PDEBUG("< dex_tty_open := %d", 0);
+	return 0;
+}
+
+/*
+ * Called by the tty driver when our line discipline is torn down.
+ */
+static void dex_tty_close (struct tty_struct *tty)
+{
+	struct dex_device *dex = tty->disc_data;
+
+	PDEBUG("> dex_tty_close(%p)", tty);
+
+	// check for dex->open_count == 0
+
+	tty->disc_data = NULL;
+
+	del_gendisk(dex->gd);
+	put_disk(dex->gd);
+
+	if (dex->request_queue)
+		blk_cleanup_queue(dex->request_queue);
+
+	kthread_stop(dex->thread);
+
+	/* FIXME: The thread could still be running here */
+	kfree(dex);
+
+	PDEBUG("< dex_tty_close");
+}
+
+static struct tty_ldisc dex_ldisc = {
+	.magic		= TTY_LDISC_MAGIC,
+	.owner		= THIS_MODULE,
+	.name		= DEX_NAME,
+	.open		= dex_tty_open,
+	.close		= dex_tty_close,
+	/* .ioctl	= dex_tty_ioctl, */
+	.receive_buf	= dex_receive_buf,
+	.write_wakeup	= dex_write_wakeup,
 };
 
 
