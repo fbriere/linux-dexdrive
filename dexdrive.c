@@ -126,11 +126,6 @@ struct dex_device {
 	/* pointer to the next byte to be written */
 	char *ptr_out;
 
-	/* device was initialized */
-	struct completion init_done;
-	/* initialization return status */
-	int init_return;
-
 	/* media change detected, waiting to be reported via media_changed() */
 	int media_changed;
 	int minor;
@@ -455,11 +450,11 @@ static int dex_transfer(struct dex_device *dex,
  * Initialize the device.  This should not be called in parallel with
  * any other communication.  Returns -ENXIO if no card is inserted.
  */
-static int dex_init_device(struct dex_device *dex)
+static int dex_spin_up(struct dex_device *dex)
 {
 	int ret;
 
-	PDEBUG("> dex_init_device(%p)", dex);
+	PDEBUG("> dex_spin_up(%p)", dex);
 
 	ret = dex_do_cmd(dex, DEX_CMD_INIT);
 	if (ret < 0)
@@ -476,10 +471,23 @@ static int dex_init_device(struct dex_device *dex)
 	if (ret < 0)
 		return ret;
 
-	PDEBUG("< dex_init_device := %i",
-				(dex->media_changed ? -ENXIO : 0));
+	ret = (dex->media_changed ? -ENXIO : 0);
 
-	return (dex->media_changed ? -ENXIO : 0);
+	PDEBUG("< dex_spin_up := %i", ret);
+
+	/* Don't bother turning on the light if no card is present */
+	if (ret == 0)
+		dex_do_cmd(dex, DEX_CMD_ON);
+
+	return ret;
+}
+
+/*
+ * Turn off the device.  All this currently does is turn off the light.
+ */
+static void dex_spin_down(struct dex_device *dex)
+{
+	dex_do_cmd(dex, DEX_CMD_OFF);
 }
 
 
@@ -635,10 +643,6 @@ static int dex_get (struct dex_device *dex)
 		ret = -ENXIO;
 	}
 
-	/* This must be done before dropping the lock */
-	if (ret == 0)
-		init_completion(&dex->init_done);
-
 	spin_unlock_irqrestore(&dex->lock, flags);
 
 	PDEBUG("< dex_get := %d", ret);
@@ -648,10 +652,11 @@ static int dex_get (struct dex_device *dex)
 
 /*
  * Record that we are no longer using this device.  If it is no longer used,
- * then it will be destroyed.
+ * then it will be destroyed.  Returns the current number of open handles, or
+ * <0 if the device was freed.
  */
 static void dex_block_teardown (struct dex_device *dex);
-static void dex_put (struct dex_device *dex)
+static int dex_put (struct dex_device *dex)
 {
 	unsigned long flags;
 	int tmp;
@@ -667,8 +672,22 @@ static void dex_put (struct dex_device *dex)
 		kfree(dex);
 	}
 
-	PDEBUG("< dex_put");
+	/* Substract one for the tty */
+	tmp--;
+
+	PDEBUG("< dex_put := %i", tmp);
+
+	return tmp;
 }
+
+/*
+ * Mutex to prevent conflict between multiple open()/release().  We may end
+ * up freeing dex when calling dex_put(), so a global mutex is safer (well,
+ * easier) than storing it within dex_device.  Unfortunately, it does mean
+ * that calls to distinct devices will block each other, but does anybody
+ * care?
+ */
+DECLARE_MUTEX(open_release_mutex);
 
 /*
  * Called when our block device is opened.
@@ -680,29 +699,22 @@ static int dex_open (struct inode *inode, struct file *filp)
 
 	PDEBUG("> dex_open(%p, %p)", inode, filp);
 
+	if (down_interruptible(&open_release_mutex))
+		return -ERESTARTSYS;
+
 	dex = inode->i_bdev->bd_disk->private_data;
 
 	ret = dex_get(dex);
-	if (ret < 0)
-		return ret;
 
-	/* Either initialize the device, or wait for someone to do it */
-	if (ret == 0) {
+	/* Initialize the device if we are the first to open it */
+	if (ret == 0)
 		/* FIXME: Wait for dex_thread to empty its queue */
-		dex->init_return = dex_init_device(dex);
-		complete_all(&dex->init_done);
-	} else {
-		/* FIXME: This may eventually exhaust the semaphore */
-		wait_for_completion_interruptible(&dex->init_done);
-	}
+		ret = dex_spin_up(dex);
 
-	/*
-	 * This may look like a race condition, but no other initialization
-	 * will take place before we call dex_put().
-	 */
-	ret = dex->init_return;
 	if (ret < 0)
 		dex_put(dex);
+
+	up(&open_release_mutex);
 
 	PDEBUG("< dex_open := %d", ret);
 
@@ -718,9 +730,18 @@ static int dex_release (struct inode *inode, struct file *filp)
 
 	PDEBUG("> dex_release(%p, %p)", inode, filp);
 
+	if (down_interruptible(&open_release_mutex))
+		return -ERESTARTSYS;
+
 	dex = inode->i_bdev->bd_disk->private_data;
 
+	/* FIXME: Yuck */
+	if (dex->tty && dex->open_count == 2)
+		dex_spin_down(dex);
+
 	dex_put(dex);
+
+	up(&open_release_mutex);
 
 	PDEBUG("< dex_release := %d", 0);
 	return 0;
