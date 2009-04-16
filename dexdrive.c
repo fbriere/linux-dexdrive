@@ -123,6 +123,11 @@ struct dex_device {
 	/* pointer to the next byte to be written */
 	char *ptr_out;
 
+	/* device was initialized */
+	struct completion init_done;
+	/* initialization return status */
+	int init_return;
+
 	/* media change detected, waiting to be reported via media_changed() */
 	int media_changed;
 	int minor;
@@ -401,9 +406,6 @@ static int dex_transfer(struct dex_device *dex,
 		dex->sector = sector;
 		dex->sector_data = buffer;
 
-		dex_do_cmd(dex, DEX_CMD_INIT);
-		dex_do_cmd(dex, DEX_CMD_MAGIC);
-
 		error = dex_do_cmd(dex, write ? DEX_CMD_WRITE : DEX_CMD_READ);
 
 		if (error < 0)
@@ -415,6 +417,37 @@ static int dex_transfer(struct dex_device *dex,
 	PDEBUG("< dex_transfer := %i", error);
 
 	return error;
+}
+
+/*
+ * Initialize the device.  This should not be called in parallel with
+ * any other communication.  Returns -ENXIO if no card is inserted.
+ */
+static int dex_init_device(struct dex_device *dex)
+{
+	int ret;
+
+	PDEBUG("> dex_init_device(%p)", dex);
+
+	ret = dex_do_cmd(dex, DEX_CMD_INIT);
+	if (ret < 0)
+		return ret;
+
+	ret = dex_do_cmd(dex, DEX_CMD_MAGIC);
+	if (ret < 0)
+		return ret;
+
+	/* Make sure we get a fresh value for this flag */
+	dex->media_changed = 0;
+
+	ret = dex_do_cmd(dex, DEX_CMD_STATUS);
+	if (ret < 0)
+		return ret;
+
+	PDEBUG("< dex_init_device := %i",
+				(dex->media_changed ? -ENXIO : 0));
+
+	return (dex->media_changed ? -ENXIO : 0);
 }
 
 
@@ -550,7 +583,8 @@ static int dex_thread (void *data)
 }
 
 /*
- * Record that we are now using this device.
+ * Record that we are now using this device.  Returns the previous number
+ * of open handles, or <0 in case of error.
  */
 static int dex_get (struct dex_device *dex)
 {
@@ -561,10 +595,17 @@ static int dex_get (struct dex_device *dex)
 
 	spin_lock_irqsave(&dex->lock, flags);
 
-	if (dex->tty)
-		dex->open_count++;
-	else
+	if (dex->tty) {
+		ret = dex->open_count++;
+		/* Substract one for the tty */
+		ret--;
+	} else {
 		ret = -ENXIO;
+	}
+
+	/* This must be done before dropping the lock */
+	if (ret == 0)
+		init_completion(&dex->init_done);
 
 	spin_unlock_irqrestore(&dex->lock, flags);
 
@@ -603,16 +644,37 @@ static void dex_put (struct dex_device *dex)
 static int dex_open (struct inode *inode, struct file *filp)
 {
 	struct dex_device *dex;
+	int ret;
 
 	PDEBUG("> dex_open(%p, %p)", inode, filp);
 
 	dex = inode->i_bdev->bd_disk->private_data;
 
-	if (dex_get(dex) != 0)
-		return -ENXIO;
+	ret = dex_get(dex);
+	if (ret < 0)
+		return ret;
 
-	PDEBUG("< dex_open := %d", 0);
-	return 0;
+	/* Either initialize the device, or wait for someone to do it */
+	if (ret == 0) {
+		/* FIXME: Wait for dex_thread to empty its queue */
+		dex->init_return = dex_init_device(dex);
+		complete_all(&dex->init_done);
+	} else {
+		/* FIXME: This may eventually exhaust the semaphore */
+		wait_for_completion_interruptible(&dex->init_done);
+	}
+
+	/*
+	 * This may look like a race condition, but no other initialization
+	 * will take place before we call dex_put().
+	 */
+	ret = dex->init_return;
+	if (ret < 0)
+		dex_put(dex);
+
+	PDEBUG("< dex_open := %d", ret);
+
+	return ret;
 }
 
 /*
