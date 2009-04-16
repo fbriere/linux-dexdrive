@@ -40,6 +40,7 @@
 #define DEX_BUFSIZE_OUT	1024		/* Size of output buffer (min. 137) */
 #define DEX_BUFSIZE_IN	1024		/* Size of input buffer (min. 208) */
 #define DEX_TIMEOUT	100		/* Timeout in msecs when waiting */
+#define DEX_MAX_RETRY	2		/* Maximum number of retries */
 /* #define DEX_IOC_MAGIC	0xfb */
 
 /* Line discipline number -- must be hijacked from include/linux/tty.h */
@@ -314,6 +315,42 @@ static int dex_read_cmd (struct dex_device *dex)
 }
 #undef mkpair
 
+/*
+ * Perform one attempt at sending a command, and wait for the reply.
+ */
+static void dex_tty_write (struct dex_device *dex);
+static int dex_attempt_cmd (struct dex_device *dex, unsigned long *flags)
+{
+	PDEBUG("> dex_attempt_cmd(%p, %p)", dex, flags);
+
+	if (!dex->tty)
+		return -EIO;
+
+	if (dex_prepare_cmd(dex) < 0)
+		return -EIO;
+
+	dex->ptr_out = dex->buf_out;
+	dex_tty_write(dex);
+
+	dex->count_in = 0;
+	dex->got_reply = 0;
+
+	/* Default in case of timeout */
+	dex->command_return = -EIO;
+
+	init_completion(&dex->command_done);
+	spin_unlock_irqrestore(&dex->lock, *flags);
+
+	wait_for_completion_interruptible_timeout(&dex->command_done,
+						msecs_to_jiffies(DEX_TIMEOUT));
+
+	spin_lock_irqsave(&dex->lock, *flags);
+
+	PDEBUG("< dex_attempt_cmd := %i", dex->command_return);
+
+	return dex->command_return;
+}
+
 
 /* High-level functions */
 
@@ -349,11 +386,10 @@ static void dex_check_reply (struct dex_device *dex)
  * Send a command to the device and wait until the response has been
  * processed.  Returns <0 in case of an error.
  */
-static void dex_tty_write (struct dex_device *dex);
 static int dex_do_cmd (struct dex_device *dex, int cmd)
 {
 	unsigned long flags;
-	int ret;
+	int ret, i;
 
 	PDEBUG("> dex_do_cmd(%p, %d", dex, cmd);
 
@@ -365,35 +401,15 @@ static int dex_do_cmd (struct dex_device *dex, int cmd)
 		goto out;
 	}
 
-	if (!dex->tty) {
-		warn("No tty");
-		ret = -EIO;
-		goto out;
-	}
-
 	dex->command = cmd;
-	dex->command_return = -EIO;
 
-	if (dex_prepare_cmd(dex) < 0) {
-		ret = -EIO;
-		goto out;
+	for (i = 0; i <= DEX_MAX_RETRY; i++) {
+		PDEBUG(" Attempt #%i", i);
+		ret = dex_attempt_cmd(dex, &flags);
+		PDEBUG(" Result: %i", ret);
+		if (ret == 0)
+			break;
 	}
-
-	dex->ptr_out = dex->buf_out;
-	dex->count_in = 0;
-	dex->got_reply = 0;
-
-	dex_tty_write(dex);
-
-	init_completion(&dex->command_done);
-	spin_unlock_irqrestore(&dex->lock, flags);
-
-	wait_for_completion_interruptible_timeout(&dex->command_done,
-						msecs_to_jiffies(DEX_TIMEOUT));
-
-	spin_lock_irqsave(&dex->lock, flags);
-
-	ret = dex->command_return;
 
 out:
 	dex->command = DEX_CMD_NONE;
