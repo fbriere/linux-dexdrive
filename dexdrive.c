@@ -172,9 +172,9 @@ static inline unsigned char reverse_byte (unsigned char x)
 	return res;
 }
 
-static inline char dex_checksum (char *ptr, int len)
+static inline unsigned char dex_checksum (unsigned char *ptr, int len)
 {
-	char res = 0;
+	unsigned char res = 0;
 	int i;
 
 	for (i = 0; i < len; i++)
