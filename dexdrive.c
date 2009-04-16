@@ -316,6 +316,8 @@ static int dex_read_cmd (struct dex_device *dex)
 static void dex_tty_write (struct dex_device *dex);
 static int dex_attempt_cmd (struct dex_device *dex, unsigned long *flags)
 {
+	int tmp;
+
 	PDEBUG("> dex_attempt_cmd(%p, %p)", dex, flags);
 
 	if (!dex->tty)
@@ -336,8 +338,11 @@ static int dex_attempt_cmd (struct dex_device *dex, unsigned long *flags)
 	init_completion(&dex->command_done);
 	spin_unlock_irqrestore(&dex->lock, *flags);
 
-	wait_for_completion_interruptible_timeout(&dex->command_done,
+	tmp = wait_for_completion_interruptible_timeout(&dex->command_done,
 						msecs_to_jiffies(DEX_TIMEOUT));
+	/* Throw -ERESTARTSYS if needed */
+	if (tmp < 0)
+		return tmp;
 
 	spin_lock_irqsave(&dex->lock, *flags);
 
@@ -604,7 +609,7 @@ static int dex_thread (void *data)
 
 	while (!kthread_should_stop() || dex->bio_head) {
 		/* TODO: ping the device regularly */
-		wait_event_interruptible(dex->thread_wait,
+		wait_event(dex->thread_wait,
 				dex->bio_head || kthread_should_stop());
 
 		if (! dex->bio_head)
