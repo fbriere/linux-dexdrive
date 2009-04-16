@@ -46,35 +46,35 @@
 #define DEX_LDISC N_X25
 
 /* List of operations we perform with the device */
-enum {
-	DEX_REQ_NONE,
-	DEX_REQ_READ,
-	DEX_REQ_WRITE,
-	DEX_REQ_INIT,
-	DEX_REQ_MAGIC,
-	DEX_REQ_ON,
-	DEX_REQ_OFF,
-	DEX_REQ_STATUS,
-	DEX_REQ_PAGE	/* Not implemented yet */
+enum dex_command {
+	DEX_CMD_NONE,
+	DEX_CMD_READ,
+	DEX_CMD_WRITE,
+	DEX_CMD_INIT,
+	DEX_CMD_MAGIC,
+	DEX_CMD_ON,
+	DEX_CMD_OFF,
+	DEX_CMD_STATUS,
+	DEX_CMD_PAGE	/* Not implemented yet */
 };
 
 /* List of opcodes */
-#define DEX_CMD_INIT	'\x00'
-#define DEX_CMD_STATUS	'\x01'
-#define DEX_CMD_READ	'\x02'
-#define DEX_CMD_WRITE	'\x04'
-#define DEX_CMD_PAGE	'\x05'
-#define DEX_CMD_LIGHT	'\x07'
-#define DEX_CMD_POUT	'\x20'
-#define DEX_CMD_ERROR	'\x21'
-#define DEX_CMD_OK	'\x22'
-#define DEX_CMD_OKCARD	'\x23'
-#define DEX_CMD_MAGIC	'\x27'
-#define DEX_CMD_WOK	'\x28'
-#define DEX_CMD_WSAME	'\x29'
-#define DEX_CMD_WAIT	'\x2a'
-#define DEX_CMD_ID	'\x40'
-#define DEX_CMD_DATA	'\x41'
+#define DEX_OPCODE_INIT		'\x00'
+#define DEX_OPCODE_STATUS	'\x01'
+#define DEX_OPCODE_READ		'\x02'
+#define DEX_OPCODE_WRITE	'\x04'
+#define DEX_OPCODE_PAGE		'\x05'
+#define DEX_OPCODE_LIGHT	'\x07'
+#define DEX_OPCODE_POUT		'\x20'
+#define DEX_OPCODE_ERROR	'\x21'
+#define DEX_OPCODE_OK		'\x22'
+#define DEX_OPCODE_OKCARD	'\x23'
+#define DEX_OPCODE_MAGIC	'\x27'
+#define DEX_OPCODE_WOK		'\x28'
+#define DEX_OPCODE_WSAME	'\x29'
+#define DEX_OPCODE_WAIT		'\x2a'
+#define DEX_OPCODE_ID		'\x40'
+#define DEX_OPCODE_DATA		'\x41'
 
 /* Prefix sent with all commands/replies */
 #define DEX_CMD_PREFIX	"IAI"
@@ -106,15 +106,16 @@ struct dex_device {
 	struct tty_struct *tty;
 	/* number of open handles that point to this device */
 	int open_count;
-	/* type of request, or nothing if we are free */
-	int request;
-	/* arguments provided with the request */
-	int request_n;
-	void *request_ptr;
-	/* request is completed */
-	struct completion request_done;
-	/* return value of request */
-	int request_return;
+	/* current command, or nothing if we are free */
+	enum dex_command command;
+	/* sector number to read/write */
+	int sector;
+	/* where to fetch/store the sector data */
+	void *sector_data;
+	/* command is completed */
+	struct completion command_done;
+	/* return value of command */
+	int command_return;
 	/* input and output buffers */
 	char buf_in[DEX_BUFSIZE_IN], buf_out[DEX_BUFSIZE_OUT];
 	/* number of bytes read / to write */
@@ -188,41 +189,41 @@ static int dex_prepare_cmd (struct dex_device *dex)
 
 	add2bufs(DEX_CMD_PREFIX, sizeof(DEX_CMD_PREFIX)-1);
 
-	switch (dex->request) {
-	case DEX_REQ_READ:
-		add2bufc(DEX_CMD_READ);
-		add2bufc(lsb(dex->request_n));
-		add2bufc(msb(dex->request_n));
+	switch (dex->command) {
+	case DEX_CMD_READ:
+		add2bufc(DEX_OPCODE_READ);
+		add2bufc(lsb(dex->sector));
+		add2bufc(msb(dex->sector));
 		break;
-	case DEX_REQ_WRITE:
-		add2bufc(DEX_CMD_WRITE);
-		add2bufc(msb(dex->request_n));
-		add2bufc(lsb(dex->request_n));
-		add2bufc(reverse_byte(msb(dex->request_n)));
-		add2bufc(reverse_byte(lsb(dex->request_n)));
-		add2bufs(dex->request_ptr, 128);
+	case DEX_CMD_WRITE:
+		add2bufc(DEX_OPCODE_WRITE);
+		add2bufc(msb(dex->sector));
+		add2bufc(lsb(dex->sector));
+		add2bufc(reverse_byte(msb(dex->sector)));
+		add2bufc(reverse_byte(lsb(dex->sector)));
+		add2bufs(dex->sector_data, 128);
 		add2bufc(dex_checksum((dex->buf_out + 4), 132));
 		break;
-	case DEX_REQ_INIT:
-		add2bufc(DEX_CMD_INIT);
+	case DEX_CMD_INIT:
+		add2bufc(DEX_OPCODE_INIT);
 		add2bufs(DEX_INIT_STR, sizeof(DEX_INIT_STR)-1);
 		break;
-	case DEX_REQ_MAGIC:
-		add2bufc(DEX_CMD_MAGIC);
+	case DEX_CMD_MAGIC:
+		add2bufc(DEX_OPCODE_MAGIC);
 		break;
-	case DEX_REQ_ON:
-		add2bufc(DEX_CMD_LIGHT);
+	case DEX_CMD_ON:
+		add2bufc(DEX_OPCODE_LIGHT);
 		add2bufc(1);
 		break;
-	case DEX_REQ_OFF:
-		add2bufc(DEX_CMD_LIGHT);
+	case DEX_CMD_OFF:
+		add2bufc(DEX_OPCODE_LIGHT);
 		add2bufc(0);
 		break;
-	case DEX_REQ_STATUS:
-		add2bufc(DEX_CMD_STATUS);
+	case DEX_CMD_STATUS:
+		add2bufc(DEX_OPCODE_STATUS);
 		break;
 	default:
-		warn("Unknown command: %d", dex->request);
+		warn("Unknown command: %d", dex->command);
 		return -1;
 	}
 
@@ -248,53 +249,53 @@ static int dex_read_cmd (struct dex_device *dex)
 		return(0);
 
 	/* There should be a better way to do this... */
-	if ((dex->request == DEX_REQ_ON) || (dex->request == DEX_REQ_OFF)) {
+	if ((dex->command == DEX_CMD_ON) || (dex->command == DEX_CMD_OFF)) {
 		PDEBUG("faking CMD_OK for CMD_LIGHT");
-		reply = DEX_CMD_OK;
+		reply = DEX_OPCODE_OK;
 	}
 
-	if (dex->request == DEX_REQ_MAGIC) {
+	if (dex->command == DEX_CMD_MAGIC) {
 		PDEBUG("faking CMD_OK for CMD_MAGIC");
-		reply = DEX_CMD_OK;
+		reply = DEX_OPCODE_OK;
 	}
 
-	if (reply == DEX_CMD_ERROR) {
+	if (reply == DEX_OPCODE_ERROR) {
 		PDEBUG("got CMD_ERROR");
 		return -EIO;
 	}
 
-	if (reply == DEX_CMD_POUT) {
+	if (reply == DEX_OPCODE_POUT) {
 		PDEBUG("got CMD_POUT");
 		return -EIO;
 	}
 
-	switch (mkpair(dex->request, reply)) {
-	case mkpair(DEX_REQ_READ, DEX_CMD_DATA):
+	switch (mkpair(dex->command, reply)) {
+	case mkpair(DEX_CMD_READ, DEX_OPCODE_DATA):
 		if (n_args < 129) return 0;
 		if ((dex_checksum((dex->buf_in + 4), 129) ^
-			lsb(dex->request_n) ^ msb(dex->request_n)) != 0) {
+			lsb(dex->sector) ^ msb(dex->sector)) != 0) {
 			return -EIO;
 		}
-		memcpy(dex->request_ptr, (dex->buf_in + 4), 128);
+		memcpy(dex->sector_data, (dex->buf_in + 4), 128);
 		return 1;
-	case mkpair(DEX_REQ_WRITE, DEX_CMD_WOK):
-	case mkpair(DEX_REQ_WRITE, DEX_CMD_WSAME):
+	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_WOK):
+	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_WSAME):
 		return 1;
-	case mkpair(DEX_REQ_READ, DEX_CMD_OK):
-	case mkpair(DEX_REQ_WRITE, DEX_CMD_OK):
+	case mkpair(DEX_CMD_READ, DEX_OPCODE_OK):
+	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_OK):
 		dex->media_changed = 1;
 		return -EIO;
-	case mkpair(DEX_REQ_INIT, DEX_CMD_ID):
+	case mkpair(DEX_CMD_INIT, DEX_OPCODE_ID):
 		if (n_args < 5) return 0;
 		return 1;
-	case mkpair(DEX_REQ_MAGIC, DEX_CMD_OK):
-	case mkpair(DEX_REQ_ON, DEX_CMD_OK):
-	case mkpair(DEX_REQ_OFF, DEX_CMD_OK):
+	case mkpair(DEX_CMD_MAGIC, DEX_OPCODE_OK):
+	case mkpair(DEX_CMD_ON, DEX_OPCODE_OK):
+	case mkpair(DEX_CMD_OFF, DEX_OPCODE_OK):
 		return 1;
-	case mkpair(DEX_REQ_STATUS, DEX_CMD_OK):
+	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_OK):
 		dex->media_changed = 1;
 		return 1;
-	case mkpair(DEX_REQ_STATUS, DEX_CMD_OKCARD):
+	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_OKCARD):
 		if (n_args < 1) return 0;
 		return 1;
 	default:
@@ -322,9 +323,9 @@ static void dex_check_reply (struct dex_device *dex)
 	ret = dex_read_cmd(dex);
 	PDEBUG(" got %i", ret);
 	if (ret != 0) {
-		dex->request = DEX_REQ_NONE;
-		dex->request_return = ret < 0 ? ret : 0;
-		complete(&dex->request_done);
+		dex->command = DEX_CMD_NONE;
+		dex->command_return = ret < 0 ? ret : 0;
+		complete(&dex->command_done);
 	}
 
 	PDEBUG("< dex_check_reply");
@@ -343,9 +344,9 @@ static int dex_do_cmd (struct dex_device *dex, int cmd)
 
 	spin_lock_irqsave(&dex->lock, flags);
 
-	if (dex->request != DEX_REQ_NONE) {
+	if (dex->command != DEX_CMD_NONE) {
 		spin_unlock_irqrestore(&dex->lock, flags);
-		warn("Already busy doing %i", dex->request);
+		warn("Already busy doing %i", dex->command);
 		return -EBUSY;
 	}
 
@@ -355,11 +356,11 @@ static int dex_do_cmd (struct dex_device *dex, int cmd)
 		return -EIO;
 	}
 
-	dex->request = cmd;
-	dex->request_return = -EIO;
+	dex->command = cmd;
+	dex->command_return = -EIO;
 
 	if (dex_prepare_cmd(dex) < 0) {
-		dex->request = DEX_REQ_NONE;
+		dex->command = DEX_CMD_NONE;
 		spin_unlock_irqrestore(&dex->lock, flags);
 		return -EIO;
 	}
@@ -369,18 +370,18 @@ static int dex_do_cmd (struct dex_device *dex, int cmd)
 
 	dex_tty_write(dex);
 
-	init_completion(&dex->request_done);
+	init_completion(&dex->command_done);
 	spin_unlock_irqrestore(&dex->lock, flags);
 
-	wait_for_completion_interruptible_timeout(&dex->request_done,
+	wait_for_completion_interruptible_timeout(&dex->command_done,
 						msecs_to_jiffies(DEX_TIMEOUT));
 
 	/* This will not have been cleared on timeout */
-	dex->request = DEX_REQ_NONE;
+	dex->command = DEX_CMD_NONE;
 
 	PDEBUG("< dex_do_cmd");
 
-	return dex->request_return;
+	return dex->command_return;
 }
 
 /*
@@ -397,13 +398,13 @@ static int dex_transfer(struct dex_device *dex,
 					buffer, write);
 
 	for (; len > 0; sector++, len--) {
-		dex->request_n = sector;
-		dex->request_ptr = buffer;
+		dex->sector = sector;
+		dex->sector_data = buffer;
 
-		dex_do_cmd(dex, DEX_REQ_INIT);
-		dex_do_cmd(dex, DEX_REQ_MAGIC);
+		dex_do_cmd(dex, DEX_CMD_INIT);
+		dex_do_cmd(dex, DEX_CMD_MAGIC);
 
-		error = dex_do_cmd(dex, write ? DEX_REQ_WRITE : DEX_REQ_READ);
+		error = dex_do_cmd(dex, write ? DEX_CMD_WRITE : DEX_CMD_READ);
 
 		if (error < 0)
 			break;
@@ -773,7 +774,7 @@ static void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 	PDEBUG("> dex_receive_buf(%p, %p, %p, %u)", tty, buf, fp, count);
 
 	spin_lock_irqsave(&dex->lock, flags);
-	if (dex->request) {
+	if (dex->command) {
 		if (count > DEX_BUFSIZE_IN - dex->count_in) {
 			warn("Input buffer overflowing");
 			count = DEX_BUFSIZE_IN - dex->count_in;
@@ -875,7 +876,7 @@ static int dex_tty_open (struct tty_struct *tty)
 
 	dex->tty = tty;
 	dex->open_count = 1;
-	dex->request = DEX_REQ_NONE;
+	dex->command = DEX_CMD_NONE;
 	dex->media_changed = 0;
 	dex->minor = -1;
 
