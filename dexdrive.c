@@ -112,6 +112,8 @@ struct dex_device {
 	int sector;
 	/* where to fetch/store the sector data */
 	void *sector_data;
+	/* whether we have received and processed a reply */
+	int got_reply;
 	/* command is completed */
 	struct completion command_done;
 	/* return value of command */
@@ -317,21 +319,28 @@ static int dex_read_cmd (struct dex_device *dex)
 
 /*
  * Check if we have received a complete response, and process it if this is
- * the case.  (This should currently be called while holding the spinlock.)
+ * the case.
  */
 static void dex_check_reply (struct dex_device *dex)
 {
+	unsigned long flags;
 	int ret;
 
 	PDEBUG("> dex_check_reply(%p)", dex);
 
-	ret = dex_read_cmd(dex);
-	PDEBUG(" got %i", ret);
-	if (ret != 0) {
-		dex->command = DEX_CMD_NONE;
-		dex->command_return = ret < 0 ? ret : 0;
-		complete(&dex->command_done);
+	spin_lock_irqsave(&dex->lock, flags);
+
+	if (! dex->got_reply) {
+		ret = dex_read_cmd(dex);
+		PDEBUG(" got %i", ret);
+		if (ret != 0) {
+			dex->got_reply = 1;
+			dex->command_return = ret < 0 ? ret : 0;
+			complete(&dex->command_done);
+		}
 	}
+
+	spin_unlock_irqrestore(&dex->lock, flags);
 
 	PDEBUG("< dex_check_reply");
 }
@@ -344,34 +353,35 @@ static void dex_tty_write (struct dex_device *dex);
 static int dex_do_cmd (struct dex_device *dex, int cmd)
 {
 	unsigned long flags;
+	int ret;
 
 	PDEBUG("> dex_do_cmd(%p, %d", dex, cmd);
 
 	spin_lock_irqsave(&dex->lock, flags);
 
 	if (dex->command != DEX_CMD_NONE) {
-		spin_unlock_irqrestore(&dex->lock, flags);
 		warn("Already busy doing %i", dex->command);
-		return -EBUSY;
+		ret = -EBUSY;
+		goto out;
 	}
 
 	if (!dex->tty) {
-		spin_unlock_irqrestore(&dex->lock, flags);
 		warn("No tty");
-		return -EIO;
+		ret = -EIO;
+		goto out;
 	}
 
 	dex->command = cmd;
 	dex->command_return = -EIO;
 
 	if (dex_prepare_cmd(dex) < 0) {
-		dex->command = DEX_CMD_NONE;
-		spin_unlock_irqrestore(&dex->lock, flags);
-		return -EIO;
+		ret = -EIO;
+		goto out;
 	}
 
 	dex->ptr_out = dex->buf_out;
 	dex->count_in = 0;
+	dex->got_reply = 0;
 
 	dex_tty_write(dex);
 
@@ -381,12 +391,18 @@ static int dex_do_cmd (struct dex_device *dex, int cmd)
 	wait_for_completion_interruptible_timeout(&dex->command_done,
 						msecs_to_jiffies(DEX_TIMEOUT));
 
-	/* This will not have been cleared on timeout */
+	spin_lock_irqsave(&dex->lock, flags);
+
+	ret = dex->command_return;
+
+out:
 	dex->command = DEX_CMD_NONE;
 
-	PDEBUG("< dex_do_cmd");
+	spin_unlock_irqrestore(&dex->lock, flags);
 
-	return dex->command_return;
+	PDEBUG("< dex_do_cmd := %i", ret);
+
+	return ret;
 }
 
 /*
@@ -836,16 +852,15 @@ static void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 	PDEBUG("> dex_receive_buf(%p, %p, %p, %u)", tty, buf, fp, count);
 
 	spin_lock_irqsave(&dex->lock, flags);
-	if (dex->command) {
-		if (count > DEX_BUFSIZE_IN - dex->count_in) {
-			warn("Input buffer overflowing");
-			count = DEX_BUFSIZE_IN - dex->count_in;
-		}
-		memcpy(dex->buf_in + dex->count_in, buf, count);
-		dex->count_in += count;
-		dex_check_reply(dex);
+	if (count > DEX_BUFSIZE_IN - dex->count_in) {
+		warn("Input buffer overflowing");
+		count = DEX_BUFSIZE_IN - dex->count_in;
 	}
+	memcpy(dex->buf_in + dex->count_in, buf, count);
+	dex->count_in += count;
 	spin_unlock_irqrestore(&dex->lock, flags);
+
+	dex_check_reply(dex);
 
 	PDEBUG("< dex_receive_buf");
 }
