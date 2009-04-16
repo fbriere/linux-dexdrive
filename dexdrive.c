@@ -608,7 +608,6 @@ static int dex_thread (void *data)
 	/* set_user_nice(current, -20); */
 
 	while (!kthread_should_stop() || dex->bio_head) {
-		/* TODO: ping the device regularly */
 		wait_event(dex->thread_wait,
 				dex->bio_head || kthread_should_stop());
 
