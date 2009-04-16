@@ -55,7 +55,7 @@ enum {
 	DEX_REQ_ON,
 	DEX_REQ_OFF,
 	DEX_REQ_STATUS,
-	DEX_REQ_PAGE	// Not implemented yet
+	DEX_REQ_PAGE	/* Not implemented yet */
 };
 
 /* List of opcodes */
@@ -142,11 +142,11 @@ struct dex_device {
 /* Low-level functions */
 
 #define add2bufc(c) \
-	do { dex->buf_out[dex->count_out] = c; dex->count_out++; } while(0)
+	do { dex->buf_out[dex->count_out] = c; dex->count_out++; } while (0)
 
 #define add2bufs(s,n) \
 	do { memcpy(dex->buf_out + dex->count_out, s, n); \
-			dex->count_out += n; } while(0)
+			dex->count_out += n; } while (0)
 
 #define lsb(x) ((x) & 0xff)
 #define msb(x) (((x) >> 8) & 0xff)
@@ -189,41 +189,41 @@ static int dex_prepare_cmd (struct dex_device *dex)
 	add2bufs(DEX_CMD_PREFIX, sizeof(DEX_CMD_PREFIX)-1);
 
 	switch (dex->request) {
-		case DEX_REQ_READ:
-			add2bufc(DEX_CMD_READ);
-			add2bufc(lsb(dex->request_n));
-			add2bufc(msb(dex->request_n));
-			break;
-		case DEX_REQ_WRITE:
-			add2bufc(DEX_CMD_WRITE);
-			add2bufc(msb(dex->request_n));
-			add2bufc(lsb(dex->request_n));
-			add2bufc(reverse_byte(msb(dex->request_n)));
-			add2bufc(reverse_byte(lsb(dex->request_n)));
-			add2bufs(dex->request_ptr, 128);
-			add2bufc(dex_checksum((dex->buf_out + 4), 132));
-			break;
-		case DEX_REQ_INIT:
-			add2bufc(DEX_CMD_INIT);
-			add2bufs(DEX_INIT_STR, sizeof(DEX_INIT_STR)-1);
-			break;
-		case DEX_REQ_MAGIC:
-			add2bufc(DEX_CMD_MAGIC);
-			break;
-		case DEX_REQ_ON:
-			add2bufc(DEX_CMD_LIGHT);
-			add2bufc(1);
-			break;
-		case DEX_REQ_OFF:
-			add2bufc(DEX_CMD_LIGHT);
-			add2bufc(0);
-			break;
-		case DEX_REQ_STATUS:
-			add2bufc(DEX_CMD_STATUS);
-			break;
-		default:
-			warn("Unknown command: %d", dex->request);
-			return -1;
+	case DEX_REQ_READ:
+		add2bufc(DEX_CMD_READ);
+		add2bufc(lsb(dex->request_n));
+		add2bufc(msb(dex->request_n));
+		break;
+	case DEX_REQ_WRITE:
+		add2bufc(DEX_CMD_WRITE);
+		add2bufc(msb(dex->request_n));
+		add2bufc(lsb(dex->request_n));
+		add2bufc(reverse_byte(msb(dex->request_n)));
+		add2bufc(reverse_byte(lsb(dex->request_n)));
+		add2bufs(dex->request_ptr, 128);
+		add2bufc(dex_checksum((dex->buf_out + 4), 132));
+		break;
+	case DEX_REQ_INIT:
+		add2bufc(DEX_CMD_INIT);
+		add2bufs(DEX_INIT_STR, sizeof(DEX_INIT_STR)-1);
+		break;
+	case DEX_REQ_MAGIC:
+		add2bufc(DEX_CMD_MAGIC);
+		break;
+	case DEX_REQ_ON:
+		add2bufc(DEX_CMD_LIGHT);
+		add2bufc(1);
+		break;
+	case DEX_REQ_OFF:
+		add2bufc(DEX_CMD_LIGHT);
+		add2bufc(0);
+		break;
+	case DEX_REQ_STATUS:
+		add2bufc(DEX_CMD_STATUS);
+		break;
+	default:
+		warn("Unknown command: %d", dex->request);
+		return -1;
 	}
 
 	PDEBUG("< dex_prepare_cmd");
@@ -269,37 +269,37 @@ static int dex_read_cmd (struct dex_device *dex)
 	}
 
 	switch (mkpair(dex->request, reply)) {
-		case mkpair(DEX_REQ_READ, DEX_CMD_DATA):
-			if (n_args < 129) return 0;
-			if ((dex_checksum((dex->buf_in + 4), 129) ^
-				lsb(dex->request_n) ^ msb(dex->request_n)) != 0) {
-				return -EIO;
-			}
-			memcpy(dex->request_ptr, (dex->buf_in + 4), 128);
-			return 1;
-		case mkpair(DEX_REQ_WRITE, DEX_CMD_WOK):
-		case mkpair(DEX_REQ_WRITE, DEX_CMD_WSAME):
-			return 1;
-		case mkpair(DEX_REQ_READ, DEX_CMD_OK):
-		case mkpair(DEX_REQ_WRITE, DEX_CMD_OK):
-			dex->media_changed = 1;
+	case mkpair(DEX_REQ_READ, DEX_CMD_DATA):
+		if (n_args < 129) return 0;
+		if ((dex_checksum((dex->buf_in + 4), 129) ^
+			lsb(dex->request_n) ^ msb(dex->request_n)) != 0) {
 			return -EIO;
-		case mkpair(DEX_REQ_INIT, DEX_CMD_ID):
-			if (n_args < 5) return 0;
-			return 1;
-		case mkpair(DEX_REQ_MAGIC, DEX_CMD_OK):
-		case mkpair(DEX_REQ_ON, DEX_CMD_OK):
-		case mkpair(DEX_REQ_OFF, DEX_CMD_OK):
-			return 1;
-		case mkpair(DEX_REQ_STATUS, DEX_CMD_OK):
-			dex->media_changed = 1;
-			return 1;
-		case mkpair(DEX_REQ_STATUS, DEX_CMD_OKCARD):
-			if (n_args < 1) return 0;
-			return 1;
-		default:
-			PDEBUG("got unknown reply %i from device", reply);
-			return -EIO;
+		}
+		memcpy(dex->request_ptr, (dex->buf_in + 4), 128);
+		return 1;
+	case mkpair(DEX_REQ_WRITE, DEX_CMD_WOK):
+	case mkpair(DEX_REQ_WRITE, DEX_CMD_WSAME):
+		return 1;
+	case mkpair(DEX_REQ_READ, DEX_CMD_OK):
+	case mkpair(DEX_REQ_WRITE, DEX_CMD_OK):
+		dex->media_changed = 1;
+		return -EIO;
+	case mkpair(DEX_REQ_INIT, DEX_CMD_ID):
+		if (n_args < 5) return 0;
+		return 1;
+	case mkpair(DEX_REQ_MAGIC, DEX_CMD_OK):
+	case mkpair(DEX_REQ_ON, DEX_CMD_OK):
+	case mkpair(DEX_REQ_OFF, DEX_CMD_OK):
+		return 1;
+	case mkpair(DEX_REQ_STATUS, DEX_CMD_OK):
+		dex->media_changed = 1;
+		return 1;
+	case mkpair(DEX_REQ_STATUS, DEX_CMD_OKCARD):
+		if (n_args < 1) return 0;
+		return 1;
+	default:
+		PDEBUG("got unknown reply %i from device", reply);
+		return -EIO;
 	}
 
 	PDEBUG("< dex_read_cmd");
@@ -462,11 +462,10 @@ static inline void dex_handle_bio(struct dex_device *dex, struct bio *bio)
  */
 static void dex_add_bio(struct dex_device *dex, struct bio *bio)
 {
-	if (dex->bio_tail) {
+	if (dex->bio_tail)
 		dex->bio_tail->bi_next = bio;
-        } else {
+        else
 		dex->bio_head = bio;
-	}
 
 	dex->bio_tail = bio;
 }
@@ -527,7 +526,7 @@ static int dex_thread (void *data)
 
 	PDEBUG(">> dex_thread starting");
 
-	// set_user_nice(current, -20);
+	/* set_user_nice(current, -20); */
 
 	while (!kthread_should_stop() || dex->bio_head) {
 		/* TODO: ping the device regularly */
@@ -774,7 +773,7 @@ static void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 	PDEBUG("> dex_receive_buf(%p, %p, %p, %u)", tty, buf, fp, count);
 
 	spin_lock_irqsave(&dex->lock, flags);
-	if(dex->request) {
+	if (dex->request) {
 		if (count > DEX_BUFSIZE_IN - dex->count_in) {
 			warn("Input buffer overflowing");
 			count = DEX_BUFSIZE_IN - dex->count_in;
@@ -824,29 +823,29 @@ int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
 	spin_lock_irqsave(&dex->lock, flags);
 
 	switch (cmd) {
-		case DEX_IOCGMAJOR:
-			ret = __put_user(major, (int *)arg);
-			break;
-		case DEX_IOCGMINOR:
-			ret = dex->minor >= 0 ?
-				__put_user(dex->minor, (int *)arg) :
-				-EIO;
-			break;
-		case DEX_IOCSMINOR:
-			ret = dex->minor < 0 ?
-				__get_user(minor, (int *)arg) :
-				-EIO;
-			if (ret == 0) {
-				if (dex_devices[minor] == NULL) {
-					dex->minor = minor;
-					dex_devices[minor] = dex;
-				} else {
-					ret = -EBUSY;
-				}
+	case DEX_IOCGMAJOR:
+		ret = __put_user(major, (int *)arg);
+		break;
+	case DEX_IOCGMINOR:
+		ret = dex->minor >= 0 ?
+			__put_user(dex->minor, (int *)arg) :
+			-EIO;
+		break;
+	case DEX_IOCSMINOR:
+		ret = dex->minor < 0 ?
+			__get_user(minor, (int *)arg) :
+			-EIO;
+		if (ret == 0) {
+			if (dex_devices[minor] == NULL) {
+				dex->minor = minor;
+				dex_devices[minor] = dex;
+			} else {
+				ret = -EBUSY;
 			}
-			break;
-		default:
-			ret = -ENOTTY;
+		}
+		break;
+	default:
+		ret = -ENOTTY;
 	}
 
 	spin_unlock_irqrestore(&dex->lock, flags);
@@ -867,7 +866,7 @@ static int dex_tty_open (struct tty_struct *tty)
 
 	PDEBUG("> dex_tty_open(%p)", tty);
 
-	if((dex = kmalloc(sizeof(struct dex_device), GFP_KERNEL)) == NULL) {
+	if ((dex = kmalloc(sizeof(struct dex_device), GFP_KERNEL)) == NULL) {
 		warn("cannot allocate device struct");
 		return -ENOMEM;
 	}
@@ -929,9 +928,8 @@ static struct tty_ldisc dex_ldisc = {
 static void dex_cleanup (void)
 {
 	PDEBUG("> dex_cleanup()");
-	if (tty_register_ldisc(DEX_LDISC, NULL) != 0) {
+	if (tty_register_ldisc(DEX_LDISC, NULL) != 0)
 		warn("can't unregister ldisc");
-	}
 	unregister_blkdev(major, DEX_NAME);
 	PDEBUG("< dex_cleanup");
 }
@@ -945,7 +943,8 @@ static int __init dex_init (void)
 		warn("can't get major %d", major);
 		return tmp;
 	}
-	if (major == 0) major = tmp;
+	if (major == 0)
+		major = tmp;
 	PDEBUG("setting major to %d", major);
 
 	if (tty_register_ldisc(DEX_LDISC, &dex_ldisc) != 0) {
