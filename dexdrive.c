@@ -35,6 +35,8 @@
 #include <linux/tty.h>
 #include <linux/tty_ldisc.h>
 
+#include "dexdrive.h"
+
 
 #define DEX_NAME	"dexdrive"	/* Driver name */
 #define DEX_MAJOR	251		/* Major device number */
@@ -43,7 +45,6 @@
 #define DEX_TIMEOUT	100		/* Timeout in msecs when waiting */
 #define DEX_MAX_RETRY	2		/* Maximum number of retries */
 #define DEX_MAX_DEVICES	4		/* Maximum number of devices */
-/* #define DEX_IOC_MAGIC	0xfb */
 
 /* Line discipline number -- must be hijacked from include/linux/tty.h */
 #define DEX_LDISC N_X25
@@ -101,11 +102,6 @@ enum dex_opcode {
 #define DEX_INIT_STR	"\x10\x29\x23\xbe\x84\xe1\x6c\xd6\xae\x52" \
 				"\x90\x49\xf1\xf1\xbb\xe9\xeb"
 
-/*
-#define DEX_IOCGMAJOR	_IOR(DEX_IOC_MAGIC, 1, sizeof(int))
-#define DEX_IOCGMINOR	_IOR(DEX_IOC_MAGIC, 2, sizeof(int))
-#define DEX_IOCSMINOR	_IOW(DEX_IOC_MAGIC, 3, sizeof(int))
-*/
 
 static unsigned int major = DEX_MAJOR;
 
@@ -1018,58 +1014,35 @@ static void dex_write_wakeup (struct tty_struct *tty)
 	PDEBUG("< dex_write_wakeup");
 }
 
-/*
-int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
-		unsigned int cmd, unsigned long arg) {
+/* Called by the tty driver upon ioctl() */
+int dex_tty_ioctl (struct tty_struct *tty, struct file *file,
+			unsigned int cmd, unsigned long arg)
+{
 	struct dex_device *dex = tty->disc_data;
 	unsigned long flags;
-	int ret, minor=0;
+	int ret;
 
-	PDEBUG("> dex_tty_ioctl(%p, %p, %u, %lu)", tty, filp, cmd, arg);
-
-	if (_IOC_TYPE(cmd) != DEX_IOC_MAGIC) return -ENOTTY;
-
-	if ((_IOC_DIR(cmd) & _IOC_READ) &&
-		!access_ok(VERIFY_WRITE, arg, _IOC_SIZE(cmd)))
-		return -EFAULT;
-	if ((_IOC_DIR(cmd) & _IOC_WRITE) &&
-		!access_ok(VERIFY_READ, arg, _IOC_SIZE(cmd)))
-		return -EFAULT;
+	PDEBUG("> dex_tty_ioctl(%p, %p, 0x%8x, %lu)", tty, file, cmd, arg);
 
 	spin_lock_irqsave(&dex->lock, flags);
 
 	switch (cmd) {
-	case DEX_IOCGMAJOR:
-		ret = __put_user(major, (int *)arg);
+	case DEX_IOCTL_GET_MAJOR:
+		ret = put_user(major, (unsigned int __user *)arg);
 		break;
-	case DEX_IOCGMINOR:
-		ret = dex->minor >= 0 ?
-			__put_user(dex->minor, (int *)arg) :
-			-EIO;
-		break;
-	case DEX_IOCSMINOR:
-		ret = dex->minor < 0 ?
-			__get_user(minor, (int *)arg) :
-			-EIO;
-		if (ret == 0) {
-			if (dex_devices[minor] == NULL) {
-				dex->minor = minor;
-				dex_devices[minor] = dex;
-			} else {
-				ret = -EBUSY;
-			}
-		}
+	case DEX_IOCTL_GET_MINOR:
+		ret = put_user(dex->i, (unsigned int __user *)arg);
 		break;
 	default:
-		ret = -ENOTTY;
+		ret = -ENOIOCTLCMD;
 	}
 
 	spin_unlock_irqrestore(&dex->lock, flags);
 
 	PDEBUG("< dex_tty_ioctl := %d", ret);
+
 	return ret;
 }
-*/
 
 /*
  * Called by the tty driver when associating a tty with our line discipline.
@@ -1139,7 +1112,7 @@ static struct tty_ldisc dex_ldisc = {
 	.name		= DEX_NAME,
 	.open		= dex_tty_open,
 	.close		= dex_tty_close,
-	/* .ioctl	= dex_tty_ioctl, */
+	.ioctl		= dex_tty_ioctl,
 	.receive_buf	= dex_receive_buf,
 	.write_wakeup	= dex_write_wakeup,
 };

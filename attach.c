@@ -6,15 +6,12 @@
 #include <sys/ioctl.h>
 #include <string.h>
 
+#include "dexdrive.h"
+
 #define DEX_LDISC N_X25
 #define DEX_BAUD  B38400
 #define DEX_TIMEOUT 50000
 #define DEX_GARBAGE "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-
-#define DEX_IOC_MAGIC 0xfb
-#define DEX_IOCGMAJOR	_IOR(DEX_IOC_MAGIC, 1, sizeof(int))
-#define DEX_IOCGMINOR	_IOR(DEX_IOC_MAGIC, 2, sizeof(int))
-#define DEX_IOCSMINOR	_IOW(DEX_IOC_MAGIC, 3, sizeof(int))
 
 #define Wrap(x) if((x) < 0) { fflush(stdout); perror(devname); return 1; }
 
@@ -42,11 +39,12 @@ int Read(int fd, char *buf, int count) {
 }
 
 
-int setup(int fd, int minor) {
+int setup(int fd) {
 	struct termios newtio;
 	int ldisc;
 	char buf[5];
 	int tmp;
+	unsigned int major, minor;
 
 	memset(&newtio, 0, sizeof(newtio));
 	newtio.c_cflag = CRTSCTS | CS8 | CLOCAL | CREAD;
@@ -74,11 +72,13 @@ int setup(int fd, int minor) {
 	Wrap(ioctl(fd, TIOCSETD, &ldisc));
 	printf("done\n");
 
-	/*
-	printf("Setting minor device number... ");
-	Wrap(ioctl(fd, DEX_IOCSMINOR, &minor));
+	printf("Getting device number: major... ");
+	Wrap(ioctl(fd, DEX_IOCTL_GET_MAJOR, &major));
+	printf("minor... ");
+	Wrap(ioctl(fd, DEX_IOCTL_GET_MINOR, &minor));
 	printf("done\n");
-	*/
+
+	printf("Device number is %u:%u\n", major, minor);
 
 	for(;;) {
 		sleep(10000);
@@ -90,15 +90,13 @@ int setup(int fd, int minor) {
 int main(int argc, char **argv) {
 	struct termios oldtio;
 	int fd;
-	int minor;
 
-	if (argc != 3) {
-		fprintf(stderr, "Usage: %s minor devicename\n", argv[0]);
+	if (argc != 2) {
+		fprintf(stderr, "Usage: %s devicename\n", argv[0]);
 		return 1;
 	}
 
-	devname = argv[2];
-	minor = atoi(argv[1]);
+	devname = argv[1];
 
 	printf("Opening %s... ", devname);
         Wrap(fd = open(devname, O_RDWR | O_NOCTTY | O_NONBLOCK));
@@ -106,7 +104,7 @@ int main(int argc, char **argv) {
 
 	Wrap(tcgetattr(fd, &oldtio));
 
-	setup(fd, minor);
+	setup(fd);
 
 	printf("Restoring tty settings... ");
 	Wrap(tcflush(fd, TCIOFLUSH));
