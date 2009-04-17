@@ -22,6 +22,7 @@
 #include <linux/init.h>
 
 #include <linux/kernel.h>
+#include <linux/bitmap.h>
 #include <linux/completion.h>
 #include <linux/kthread.h>
 #include <linux/slab.h>		/* kmalloc() */
@@ -41,6 +42,7 @@
 #define DEX_BUFSIZE_IN	1024		/* Size of input buffer (min. 208) */
 #define DEX_TIMEOUT	100		/* Timeout in msecs when waiting */
 #define DEX_MAX_RETRY	2		/* Maximum number of retries */
+#define DEX_MAX_DEVICES	4		/* Maximum number of devices */
 /* #define DEX_IOC_MAGIC	0xfb */
 
 /* Line discipline number -- must be hijacked from include/linux/tty.h */
@@ -116,6 +118,8 @@ static unsigned int major = DEX_MAJOR;
 
 /* Data associated with each device */
 struct dex_device {
+	int i;
+
 	/* spinlock -- should be held almost all the time */
 	spinlock_t lock;
 	/* tty attached to the device */
@@ -143,8 +147,6 @@ struct dex_device {
 
 	/* media change detected, waiting to be reported via media_changed() */
 	int media_changed;
-	int minor;
-
 	/* model: PSX or N64 */
 	enum dex_model model;
 
@@ -159,6 +161,38 @@ struct dex_device {
 	/* Wait queue used to wake up the thread when filling the stack */
 	wait_queue_head_t thread_wait;
 };
+
+/* This is just to remember which values are currently in use */
+static DECLARE_BITMAP(dex_devices, DEX_MAX_DEVICES);
+static DEFINE_MUTEX(dex_devices_mutex);
+
+/* Find and set a free bit */
+static int dex_get_i (void)
+{
+	int i;
+
+	if (mutex_lock_interruptible(&dex_devices_mutex) < 0)
+		return -ERESTARTSYS;
+
+	i = find_first_zero_bit(dex_devices, DEX_MAX_DEVICES);
+
+	if (i < DEX_MAX_DEVICES)
+		set_bit(i, dex_devices);
+	else
+		i = -1;
+
+	mutex_unlock(&dex_devices_mutex);
+
+	return i;
+}
+
+static void dex_put_i (int i)
+{
+	/* We can't return -ERESTARTSYS, so just block */
+	mutex_lock(&dex_devices_mutex);
+	clear_bit(i, dex_devices);
+	mutex_unlock(&dex_devices_mutex);
+}
 
 
 /* Low-level functions */
@@ -736,6 +770,7 @@ static int dex_put (struct dex_device *dex)
 
 	if (tmp == 0) {
 		dex_block_teardown(dex);
+		dex_put_i(dex->i);
 		kfree(dex);
 	}
 
@@ -856,7 +891,7 @@ static int dex_block_setup (struct dex_device *dex)
 	dex->bio_head = dex->bio_tail = NULL;
 
 	init_waitqueue_head(&dex->thread_wait);
-	dex->thread = kthread_run(dex_thread, dex, "dexdrive%d", 0);
+	dex->thread = kthread_run(dex_thread, dex, "dexdrive%d", dex->i);
 
 	if (IS_ERR(dex->thread)) {
 		warn("cannot create thread");
@@ -871,12 +906,12 @@ static int dex_block_setup (struct dex_device *dex)
 		goto err;
 	}
 	dex->gd->major = major;
-	dex->gd->first_minor = 0;
+	dex->gd->first_minor = dex->i;
 	dex->gd->fops = &dex_bdops;
 	dex->gd->queue = dex->request_queue;
 	dex->gd->flags |= GENHD_FL_REMOVABLE;
 	dex->gd->private_data = dex;
-	snprintf(dex->gd->disk_name, 32, "dexdrive%u", 0);
+	snprintf(dex->gd->disk_name, 32, "dexdrive%u", dex->i);
 	add_disk(dex->gd);
 
 	return 0;
@@ -1043,9 +1078,15 @@ int dex_tty_ioctl (struct tty_struct *tty, struct file *filp,
 static int dex_tty_open (struct tty_struct *tty)
 {
 	struct dex_device *dex;
-	int ret;
+	int ret, i;
 
 	PDEBUG("> dex_tty_open(%p)", tty);
+
+	i = dex_get_i();
+	if (i < 0)
+		return -ENOMEM;
+
+	PDEBUG(" got index %i", i);
 
 	if ((dex = kmalloc(sizeof(struct dex_device), GFP_KERNEL)) == NULL) {
 		warn("cannot allocate device struct");
@@ -1053,12 +1094,12 @@ static int dex_tty_open (struct tty_struct *tty)
 	}
 
 	spin_lock_init(&dex->lock);
+	dex->i = i;
 
 	dex->tty = tty;
 	dex->open_count = 1;
 	dex->command = DEX_CMD_NONE;
 	dex->media_changed = 0;
-	dex->minor = -1;
 
 	tty->disc_data = dex;
 	tty->receive_room = DEX_BUFSIZE_IN;
