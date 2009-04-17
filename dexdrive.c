@@ -67,11 +67,12 @@ enum dex_opcode {
 	DEX_OPCODE_WRITE	= 0x04,
 	DEX_OPCODE_PAGE		= 0x05,
 	DEX_OPCODE_LIGHT	= 0x07,
+	DEX_OPCODE_MAGIC	= 0x27,
+
 	DEX_OPCODE_POUT		= 0x20,
 	DEX_OPCODE_ERROR	= 0x21,
-	DEX_OPCODE_OK		= 0x22,
-	DEX_OPCODE_OKCARD	= 0x23,
-	DEX_OPCODE_MAGIC	= 0x27,
+	DEX_OPCODE_NOCARD	= 0x22,
+	DEX_OPCODE_CARD		= 0x23,
 	DEX_OPCODE_WOK		= 0x28,
 	DEX_OPCODE_WSAME	= 0x29,
 	DEX_OPCODE_WAIT		= 0x2a,
@@ -255,13 +256,13 @@ static int dex_read_cmd (struct dex_device *dex)
 
 	/* There should be a better way to do this... */
 	if ((dex->command == DEX_CMD_ON) || (dex->command == DEX_CMD_OFF)) {
-		PDEBUG("faking CMD_OK for CMD_LIGHT");
-		reply = DEX_OPCODE_OK;
+		PDEBUG("faking NOCARD for CMD_LIGHT");
+		reply = DEX_OPCODE_NOCARD;
 	}
 
 	if (dex->command == DEX_CMD_MAGIC) {
-		PDEBUG("faking CMD_OK for CMD_MAGIC");
-		reply = DEX_OPCODE_OK;
+		PDEBUG("faking NOCARD for CMD_MAGIC");
+		reply = DEX_OPCODE_NOCARD;
 	}
 
 	if (reply == DEX_OPCODE_ERROR) {
@@ -286,21 +287,21 @@ static int dex_read_cmd (struct dex_device *dex)
 	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_WOK):
 	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_WSAME):
 		return 1;
-	case mkpair(DEX_CMD_READ, DEX_OPCODE_OK):
-	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_OK):
+	case mkpair(DEX_CMD_READ, DEX_OPCODE_NOCARD):
+	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_NOCARD):
 		dex->media_changed = 1;
 		return -EIO;
 	case mkpair(DEX_CMD_INIT, DEX_OPCODE_ID):
 		if (n_args < 5) return 0;
 		return 1;
-	case mkpair(DEX_CMD_MAGIC, DEX_OPCODE_OK):
-	case mkpair(DEX_CMD_ON, DEX_OPCODE_OK):
-	case mkpair(DEX_CMD_OFF, DEX_OPCODE_OK):
+	case mkpair(DEX_CMD_MAGIC, DEX_OPCODE_NOCARD):
+	case mkpair(DEX_CMD_ON, DEX_OPCODE_NOCARD):
+	case mkpair(DEX_CMD_OFF, DEX_OPCODE_NOCARD):
 		return 1;
-	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_OK):
+	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_NOCARD):
 		dex->media_changed = 1;
 		return 1;
-	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_OKCARD):
+	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_CARD):
 		if (n_args < 1) return 0;
 		return 1;
 	default:
