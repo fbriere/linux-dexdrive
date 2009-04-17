@@ -60,22 +60,24 @@ enum dex_command {
 };
 
 /* List of opcodes */
-#define DEX_OPCODE_INIT		'\x00'
-#define DEX_OPCODE_STATUS	'\x01'
-#define DEX_OPCODE_READ		'\x02'
-#define DEX_OPCODE_WRITE	'\x04'
-#define DEX_OPCODE_PAGE		'\x05'
-#define DEX_OPCODE_LIGHT	'\x07'
-#define DEX_OPCODE_POUT		'\x20'
-#define DEX_OPCODE_ERROR	'\x21'
-#define DEX_OPCODE_OK		'\x22'
-#define DEX_OPCODE_OKCARD	'\x23'
-#define DEX_OPCODE_MAGIC	'\x27'
-#define DEX_OPCODE_WOK		'\x28'
-#define DEX_OPCODE_WSAME	'\x29'
-#define DEX_OPCODE_WAIT		'\x2a'
-#define DEX_OPCODE_ID		'\x40'
-#define DEX_OPCODE_DATA		'\x41'
+enum dex_opcode {
+	DEX_OPCODE_INIT		= 0x00,
+	DEX_OPCODE_STATUS	= 0x01,
+	DEX_OPCODE_READ		= 0x02,
+	DEX_OPCODE_WRITE	= 0x04,
+	DEX_OPCODE_PAGE		= 0x05,
+	DEX_OPCODE_LIGHT	= 0x07,
+	DEX_OPCODE_POUT		= 0x20,
+	DEX_OPCODE_ERROR	= 0x21,
+	DEX_OPCODE_OK		= 0x22,
+	DEX_OPCODE_OKCARD	= 0x23,
+	DEX_OPCODE_MAGIC	= 0x27,
+	DEX_OPCODE_WOK		= 0x28,
+	DEX_OPCODE_WSAME	= 0x29,
+	DEX_OPCODE_WAIT		= 0x2a,
+	DEX_OPCODE_ID		= 0x40,
+	DEX_OPCODE_DATA		= 0x41,
+};
 
 /* Prefix sent with all commands/replies */
 #define DEX_CMD_PREFIX	"IAI"
