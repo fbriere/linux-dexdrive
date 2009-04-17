@@ -114,8 +114,8 @@ struct dex_device {
 	enum dex_command command;
 	/* sector number to read/write */
 	int sector;
-	/* where to fetch/store the sector data */
-	void *sector_data;
+	/* where to fetch/store data */
+	char *data;
 	/* whether we have received and processed a reply */
 	int got_reply;
 	/* command is completed */
@@ -207,7 +207,7 @@ static int dex_prepare_cmd (struct dex_device *dex)
 		add2bufc(lsb(dex->sector));
 		add2bufc(reverse_byte(msb(dex->sector)));
 		add2bufc(reverse_byte(lsb(dex->sector)));
-		add2bufs(dex->sector_data, 128);
+		add2bufs(dex->data, 128);
 		add2bufc(dex_checksum((dex->buf_out + 4), 132));
 		break;
 	case DEX_CMD_INIT:
@@ -282,7 +282,7 @@ static int dex_read_cmd (struct dex_device *dex)
 			lsb(dex->sector) ^ msb(dex->sector)) != 0) {
 			return -EIO;
 		}
-		memcpy(dex->sector_data, (dex->buf_in + 4), 128);
+		memcpy(dex->data, (dex->buf_in + 4), 128);
 		return 1;
 	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_WOK):
 	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_WSAME):
@@ -293,6 +293,7 @@ static int dex_read_cmd (struct dex_device *dex)
 		return -EIO;
 	case mkpair(DEX_CMD_INIT, DEX_OPCODE_ID):
 		if (n_args < 5) return 0;
+		memcpy(dex->data, (dex->buf_in + 4), 5);
 		return 1;
 	case mkpair(DEX_CMD_MAGIC, DEX_OPCODE_NOCARD):
 	case mkpair(DEX_CMD_ON, DEX_OPCODE_NOCARD):
@@ -439,7 +440,7 @@ static int dex_transfer(struct dex_device *dex,
 
 	for (; len > 0; sector++, len--) {
 		dex->sector = sector;
-		dex->sector_data = buffer;
+		dex->data = buffer;
 
 		error = dex_do_cmd(dex, write ? DEX_CMD_WRITE : DEX_CMD_READ);
 
@@ -460,13 +461,20 @@ static int dex_transfer(struct dex_device *dex,
  */
 static int dex_spin_up(struct dex_device *dex)
 {
+	char init_data[5];
 	int ret;
 
 	PDEBUG("> dex_spin_up(%p)", dex);
 
+	dex->data = init_data;
 	ret = dex_do_cmd(dex, DEX_CMD_INIT);
 	if (ret < 0)
 		return ret;
+
+	if (init_data[1] == 'P' && init_data[2] == 'S' && init_data[3] == 'X')
+		;
+	else
+		return -EIO;
 
 	ret = dex_do_cmd(dex, DEX_CMD_MAGIC);
 	if (ret < 0)
