@@ -37,7 +37,7 @@
 
 #define DEX_NAME	"dexdrive"	/* Driver name */
 #define DEX_MAJOR	251		/* Major device number */
-#define DEX_BUFSIZE_OUT	1024		/* Size of output buffer (min. 137) */
+#define DEX_BUFSIZE_OUT	1024		/* Size of output buffer (min. 261) */
 #define DEX_BUFSIZE_IN	1024		/* Size of input buffer (min. 208) */
 #define DEX_TIMEOUT	100		/* Timeout in msecs when waiting */
 #define DEX_MAX_RETRY	2		/* Maximum number of retries */
@@ -46,10 +46,19 @@
 /* Line discipline number -- must be hijacked from include/linux/tty.h */
 #define DEX_LDISC N_X25
 
+
+/* DexDrive models */
+enum dex_model { DEX_MODEL_PSX, DEX_MODEL_N64 };
+
+/* PSX sectors have 256 bytes; N64 sectors, 512 */
+#define dex_sector_shift(dex) ((dex)->model == DEX_MODEL_PSX ? 7 : 8)
+#define dex_sector_size(dex) (1 << dex_sector_shift(dex))
+
 /* List of operations we perform with the device */
 enum dex_command {
 	DEX_CMD_NONE,
 	DEX_CMD_READ,
+	DEX_CMD_SEEK,
 	DEX_CMD_WRITE,
 	DEX_CMD_INIT,
 	DEX_CMD_MAGIC,
@@ -64,6 +73,7 @@ enum dex_opcode {
 	DEX_OPCODE_INIT		= 0x00,
 	DEX_OPCODE_STATUS	= 0x01,
 	DEX_OPCODE_READ		= 0x02,
+	DEX_OPCODE_SEEK		= 0x03,
 	DEX_OPCODE_WRITE	= 0x04,
 	DEX_OPCODE_PAGE		= 0x05,
 	DEX_OPCODE_LIGHT	= 0x07,
@@ -73,6 +83,8 @@ enum dex_opcode {
 	DEX_OPCODE_ERROR	= 0x21,
 	DEX_OPCODE_NOCARD	= 0x22,
 	DEX_OPCODE_CARD		= 0x23,
+	DEX_OPCODE_CARD_NEW	= 0x25,
+	DEX_OPCODE_SEEK_OK	= 0x27,
 	DEX_OPCODE_WOK		= 0x28,
 	DEX_OPCODE_WSAME	= 0x29,
 	DEX_OPCODE_WAIT		= 0x2a,
@@ -132,6 +144,9 @@ struct dex_device {
 	/* media change detected, waiting to be reported via media_changed() */
 	int media_changed;
 	int minor;
+
+	/* model: PSX or N64 */
+	enum dex_model model;
 
 	/* Disk device we have created */
 	struct gendisk *gd;
@@ -201,14 +216,24 @@ static int dex_prepare_cmd (struct dex_device *dex)
 		add2bufc(lsb(dex->sector));
 		add2bufc(msb(dex->sector));
 		break;
+	case DEX_CMD_SEEK:
+		if (dex->model == DEX_MODEL_PSX)
+			return -1;
+
+		add2bufc(DEX_OPCODE_SEEK);
+		add2bufc(lsb(dex->sector));
+		add2bufc(msb(dex->sector));
+		break;
 	case DEX_CMD_WRITE:
 		add2bufc(DEX_OPCODE_WRITE);
-		add2bufc(msb(dex->sector));
-		add2bufc(lsb(dex->sector));
-		add2bufc(reverse_byte(msb(dex->sector)));
-		add2bufc(reverse_byte(lsb(dex->sector)));
-		add2bufs(dex->data, 128);
-		add2bufc(dex_checksum((dex->buf_out + 4), 132));
+		if (dex->model == DEX_MODEL_PSX) {
+			add2bufc(msb(dex->sector));
+			add2bufc(lsb(dex->sector));
+			add2bufc(reverse_byte(msb(dex->sector)));
+			add2bufc(reverse_byte(lsb(dex->sector)));
+		}
+		add2bufs(dex->data, dex_sector_size(dex));
+		add2bufc(dex_checksum((dex->buf_out + 4), (dex->count_out - 4)));
 		break;
 	case DEX_CMD_INIT:
 		add2bufc(DEX_OPCODE_INIT);
@@ -277,17 +302,20 @@ static int dex_read_cmd (struct dex_device *dex)
 
 	switch (mkpair(dex->command, reply)) {
 	case mkpair(DEX_CMD_READ, DEX_OPCODE_DATA):
-		if (n_args < 129) return 0;
-		if ((dex_checksum((dex->buf_in + 4), 129) ^
-			lsb(dex->sector) ^ msb(dex->sector)) != 0) {
+		if (n_args < (dex_sector_size(dex) + 1))
+			return 0;
+		if ((dex_checksum((dex->buf_in + 4), (dex_sector_size(dex) + 1))
+			^ lsb(dex->sector) ^ msb(dex->sector)) != 0) {
 			return -EIO;
 		}
-		memcpy(dex->data, (dex->buf_in + 4), 128);
+		memcpy(dex->data, (dex->buf_in + 4), dex_sector_size(dex));
 		return 1;
+	case mkpair(DEX_CMD_SEEK, DEX_OPCODE_SEEK_OK):
 	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_WOK):
 	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_WSAME):
 		return 1;
 	case mkpair(DEX_CMD_READ, DEX_OPCODE_NOCARD):
+	case mkpair(DEX_CMD_SEEK, DEX_OPCODE_NOCARD):
 	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_NOCARD):
 		dex->media_changed = 1;
 		return -EIO;
@@ -303,7 +331,9 @@ static int dex_read_cmd (struct dex_device *dex)
 		dex->media_changed = 1;
 		return 1;
 	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_CARD):
-		if (n_args < 1) return 0;
+	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_CARD_NEW):
+		if ((dex->model == DEX_MODEL_PSX) && (n_args < 1))
+			return 0;
 		return 1;
 	default:
 		PDEBUG("got unknown reply %i from device", reply);
@@ -339,8 +369,23 @@ static int dex_attempt_cmd (struct dex_device *dex, unsigned long *flags)
 	/* Default in case of timeout */
 	dex->command_return = -EIO;
 
+	/* The N64 model might not reply to these, but we don't mind */
+	if (dex->model == DEX_MODEL_N64) {
+		switch (dex->command) {
+		case DEX_CMD_MAGIC:
+		case DEX_CMD_ON:
+		case DEX_CMD_OFF:
+			dex->command_return = 0;
+		/* Silence gcc warning about not checking the other enum values */
+		default:
+			;
+		}
+	}
+
 	init_completion(&dex->command_done);
 	spin_unlock_irqrestore(&dex->lock, *flags);
+
+	/* TODO: Skip this for N64 and DEX_CMD_ON/OFF */
 
 	tmp = wait_for_completion_interruptible_timeout(&dex->command_done,
 						msecs_to_jiffies(DEX_TIMEOUT));
@@ -442,12 +487,18 @@ static int dex_transfer(struct dex_device *dex,
 		dex->sector = sector;
 		dex->data = buffer;
 
+		if (write && (dex->model == DEX_MODEL_N64)) {
+			error = dex_do_cmd(dex, DEX_CMD_SEEK);
+			if (error < 0)
+				break;
+		}
+
 		error = dex_do_cmd(dex, write ? DEX_CMD_WRITE : DEX_CMD_READ);
 
 		if (error < 0)
 			break;
 
-		buffer += 128;
+		buffer += dex_sector_size(dex);
 	}
 
 	PDEBUG("< dex_transfer := %i", error);
@@ -472,9 +523,16 @@ static int dex_spin_up(struct dex_device *dex)
 		return ret;
 
 	if (init_data[1] == 'P' && init_data[2] == 'S' && init_data[3] == 'X')
-		;
+		dex->model = DEX_MODEL_PSX;
+	else if (init_data[1] == 'N' && init_data[2] == '6' && init_data[3] == '4')
+		dex->model = DEX_MODEL_N64;
 	else
 		return -EIO;
+
+	PDEBUG(" model is %i", dex->model);
+
+	/* A regular PSX memory card holds 128 KiB; a N64 card holds 32 KiB */
+	set_capacity(dex->gd, (dex->model == DEX_MODEL_PSX ? 128 : 32) * 2);
 
 	ret = dex_do_cmd(dex, DEX_CMD_MAGIC);
 	if (ret < 0)
@@ -521,16 +579,10 @@ static inline void dex_handle_bio(struct dex_device *dex, struct bio *bio)
 
 	PDEBUG(">> dex_handle_bio(%p, %p)", dex, bio);
 
-	sector = bio->bi_sector << 2;
+	sector = bio->bi_sector << (9 - dex_sector_shift(dex));
 
 	bio_for_each_segment(bvec, bio, i) {
-		sector_t len = (bvec->bv_len >> 7);
-
-		if ((bvec->bv_len & 0x7f) != 0) {
-			warn (KERN_NOTICE "Partial read/write\n");
-			error = -EIO;
-			break;
-		}
+		sector_t len = (bvec->bv_len >> dex_sector_shift(dex));
 
 		error = dex_transfer(dex, sector, len,
 					kmap(bvec->bv_page) + bvec->bv_offset,
@@ -825,7 +877,6 @@ static int dex_block_setup (struct dex_device *dex)
 	dex->gd->flags |= GENHD_FL_REMOVABLE;
 	dex->gd->private_data = dex;
 	snprintf(dex->gd->disk_name, 32, "dexdrive%u", 0);
-	set_capacity(dex->gd, 128 * 2);
 	add_disk(dex->gd);
 
 	return 0;
