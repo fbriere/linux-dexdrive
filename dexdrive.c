@@ -21,6 +21,7 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
+#include <linux/version.h>
 
 #include <linux/kernel.h>
 #include <linux/bitmap.h>
@@ -793,17 +794,25 @@ DECLARE_MUTEX(open_release_mutex);
 /*
  * Called when our block device is opened.
  */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
 static int dex_open (struct inode *inode, struct file *filp)
+#else
+static int dex_open (struct block_device *bdev, fmode_t mode)
+#endif
 {
 	struct dex_device *dex;
 	int ret;
 
-	PDEBUG("> dex_open(%p, %p)", inode, filp);
+	PDEBUG("> dex_open(...)");
 
 	if (down_interruptible(&open_release_mutex))
 		return -ERESTARTSYS;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
 	dex = inode->i_bdev->bd_disk->private_data;
+#else
+	dex = bdev->bd_disk->private_data;
+#endif
 
 	ret = dex_get(dex);
 
@@ -825,16 +834,24 @@ static int dex_open (struct inode *inode, struct file *filp)
 /*
  * Called when our block device is closed.
  */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
 static int dex_release (struct inode *inode, struct file *filp)
+#else
+static int dex_release (struct gendisk *disk, fmode_t mode)
+#endif
 {
 	struct dex_device *dex;
 
-	PDEBUG("> dex_release(%p, %p)", inode, filp);
+	PDEBUG("> dex_release(...)");
 
 	if (down_interruptible(&open_release_mutex))
 		return -ERESTARTSYS;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
 	dex = inode->i_bdev->bd_disk->private_data;
+#else
+	dex = disk->private_data;
+#endif
 
 	/* FIXME: Yuck */
 	if (dex->tty && dex->open_count == 2)
@@ -1109,7 +1126,10 @@ static void dex_tty_close (struct tty_struct *tty)
 	PDEBUG("< dex_tty_close");
 }
 
-static struct tty_ldisc dex_ldisc = {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,27)
+# define tty_ldisc_ops tty_ldisc
+#endif
+static struct tty_ldisc_ops dex_ldisc = {
 	.magic		= TTY_LDISC_MAGIC,
 	.owner		= THIS_MODULE,
 	.name		= DEX_NAME,
