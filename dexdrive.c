@@ -1164,7 +1164,8 @@ module_init(dex_init);
 module_exit(dex_cleanup);
 
 
-MODULE_AUTHOR("fbriere");
-MODULE_DESCRIPTION("blabla");
+/* Apparently, the kernel is not ready for UTF-8 yet */
+MODULE_AUTHOR("Frederic Briere <fbriere@fbriere.net>");
+MODULE_DESCRIPTION("DexDrive block device driver");
 MODULE_LICENSE("GPL");
 
