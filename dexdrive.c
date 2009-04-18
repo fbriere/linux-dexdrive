@@ -200,10 +200,10 @@ static void dex_put_i (int i)
 
 /* Low-level functions */
 
-#define add2bufc(c) \
+#define add2bufc(dex, c) \
 	do { dex->buf_out[dex->count_out] = c; dex->count_out++; } while (0)
 
-#define add2bufs(s,n) \
+#define add2bufs(dex, s, n) \
 	do { memcpy(dex->buf_out + dex->count_out, s, n); \
 			dex->count_out += n; } while (0)
 
@@ -242,50 +242,50 @@ static int dex_prepare_cmd (struct dex_device *dex)
 
 	dex->count_out = 0;
 
-	add2bufs(DEX_CMD_PREFIX, sizeof(DEX_CMD_PREFIX)-1);
+	add2bufs(dex, DEX_CMD_PREFIX, sizeof(DEX_CMD_PREFIX)-1);
 
 	switch (dex->command) {
 	case DEX_CMD_READ:
-		add2bufc(DEX_OPCODE_READ);
-		add2bufc(lsb(dex->sector));
-		add2bufc(msb(dex->sector));
+		add2bufc(dex, DEX_OPCODE_READ);
+		add2bufc(dex, lsb(dex->sector));
+		add2bufc(dex, msb(dex->sector));
 		break;
 	case DEX_CMD_SEEK:
 		if (dex->model == DEX_MODEL_PSX)
 			return -1;
 
-		add2bufc(DEX_OPCODE_SEEK);
-		add2bufc(lsb(dex->sector));
-		add2bufc(msb(dex->sector));
+		add2bufc(dex, DEX_OPCODE_SEEK);
+		add2bufc(dex, lsb(dex->sector));
+		add2bufc(dex, msb(dex->sector));
 		break;
 	case DEX_CMD_WRITE:
-		add2bufc(DEX_OPCODE_WRITE);
+		add2bufc(dex, DEX_OPCODE_WRITE);
 		if (dex->model == DEX_MODEL_PSX) {
-			add2bufc(msb(dex->sector));
-			add2bufc(lsb(dex->sector));
-			add2bufc(reverse_byte(msb(dex->sector)));
-			add2bufc(reverse_byte(lsb(dex->sector)));
+			add2bufc(dex, msb(dex->sector));
+			add2bufc(dex, lsb(dex->sector));
+			add2bufc(dex, reverse_byte(msb(dex->sector)));
+			add2bufc(dex, reverse_byte(lsb(dex->sector)));
 		}
-		add2bufs(dex->data, dex_sector_size(dex));
-		add2bufc(dex_checksum((dex->buf_out + 4), (dex->count_out - 4)));
+		add2bufs(dex, dex->data, dex_sector_size(dex));
+		add2bufc(dex, dex_checksum((dex->buf_out + 4), (dex->count_out - 4)));
 		break;
 	case DEX_CMD_INIT:
-		add2bufc(DEX_OPCODE_INIT);
-		add2bufs(DEX_INIT_STR, sizeof(DEX_INIT_STR)-1);
+		add2bufc(dex, DEX_OPCODE_INIT);
+		add2bufs(dex, DEX_INIT_STR, sizeof(DEX_INIT_STR)-1);
 		break;
 	case DEX_CMD_MAGIC:
-		add2bufc(DEX_OPCODE_MAGIC);
+		add2bufc(dex, DEX_OPCODE_MAGIC);
 		break;
 	case DEX_CMD_ON:
-		add2bufc(DEX_OPCODE_LIGHT);
-		add2bufc(1);
+		add2bufc(dex, DEX_OPCODE_LIGHT);
+		add2bufc(dex, 1);
 		break;
 	case DEX_CMD_OFF:
-		add2bufc(DEX_OPCODE_LIGHT);
-		add2bufc(0);
+		add2bufc(dex, DEX_OPCODE_LIGHT);
+		add2bufc(dex, 0);
 		break;
 	case DEX_CMD_STATUS:
-		add2bufc(DEX_OPCODE_STATUS);
+		add2bufc(dex, DEX_OPCODE_STATUS);
 		break;
 	default:
 		warn("Unknown command: %d", dex->command);
