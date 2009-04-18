@@ -170,7 +170,7 @@ static DECLARE_BITMAP(dex_devices, DEX_MAX_DEVICES);
 static DEFINE_MUTEX(dex_devices_mutex);
 
 /* Find and set a free bit */
-static int dex_get_i (void)
+static int dex_get_i(void)
 {
 	int i;
 
@@ -189,7 +189,7 @@ static int dex_get_i (void)
 	return i;
 }
 
-static void dex_put_i (int i)
+static void dex_put_i(int i)
 {
 	/* We can't return -ERESTARTSYS, so just block */
 	mutex_lock(&dex_devices_mutex);
@@ -214,13 +214,13 @@ static void dex_put_i (int i)
  * Reverse the bits in a byte, copied from
  * <http://graphics.stanford.edu/~seander/bithacks.html#ReverseByteWith32Bits>.
  */
-static inline unsigned char reverse_byte (unsigned char b)
+static inline unsigned char reverse_byte(unsigned char b)
 {
 	return ((b * 0x0802LU & 0x22110LU) | (b * 0x8020LU & 0x88440LU))
 		* 0x10101LU >> 16;
 }
 
-static inline unsigned char dex_checksum (unsigned char *ptr, int len)
+static inline unsigned char dex_checksum(unsigned char *ptr, int len)
 {
 	unsigned char res = 0;
 	int i;
@@ -236,7 +236,7 @@ static inline unsigned char dex_checksum (unsigned char *ptr, int len)
  * Fills buf_out with the data that will be sent to the device.  Returns <0
  * in case of error.
  */
-static int dex_prepare_cmd (struct dex_device *dex)
+static int dex_prepare_cmd(struct dex_device *dex)
 {
 	PDEBUG("> dex_prepare_cmd(%p)", dex);
 
@@ -303,7 +303,7 @@ static int dex_prepare_cmd (struct dex_device *dex)
  * was an error.
  */
 #define mkpair(req, reply) (((req) << 8) | (reply))
-static int dex_read_cmd (struct dex_device *dex)
+static int dex_read_cmd(struct dex_device *dex)
 {
 	int reply = dex->buf_in[3];
 	int n_args = dex->count_in - 4;
@@ -381,8 +381,8 @@ static int dex_read_cmd (struct dex_device *dex)
 /*
  * Perform one attempt at sending a command, and wait for the reply.
  */
-static void dex_tty_write (struct dex_device *dex);
-static int dex_attempt_cmd (struct dex_device *dex, unsigned long *flags)
+static void dex_tty_write(struct dex_device *dex);
+static int dex_attempt_cmd(struct dex_device *dex, unsigned long *flags)
 {
 	int tmp;
 
@@ -441,7 +441,7 @@ static int dex_attempt_cmd (struct dex_device *dex, unsigned long *flags)
  * Check if we have received a complete response, and process it if this is
  * the case.
  */
-static void dex_check_reply (struct dex_device *dex)
+static void dex_check_reply(struct dex_device *dex)
 {
 	unsigned long flags;
 	int ret;
@@ -469,7 +469,7 @@ static void dex_check_reply (struct dex_device *dex)
  * Send a command to the device and wait until the response has been
  * processed.  Returns <0 in case of an error.
  */
-static int dex_do_cmd (struct dex_device *dex, int cmd)
+static int dex_do_cmd(struct dex_device *dex, int cmd)
 {
 	unsigned long flags;
 	int ret, i;
@@ -667,7 +667,7 @@ static struct bio *dex_get_bio(struct dex_device *dex)
  * Called by the kernel when a new block IO operation is created, which we
  * add to the queue for dex_thread() to handle.
  */
-static int dex_make_request (struct request_queue *queue, struct bio *bio)
+static int dex_make_request(struct request_queue *queue, struct bio *bio)
 {
 	struct dex_device *dex = queue->queuedata;
 	unsigned long flags;
@@ -694,7 +694,7 @@ static int dex_make_request (struct request_queue *queue, struct bio *bio)
  * A kernel thread dedicated to processing bio's; it merely waits for more to
  * appear on the stack, and dispatches them to dex_handle_bio().
  */
-static int dex_thread (void *data)
+static int dex_thread(void *data)
 {
 	struct dex_device *dex = data;
 	struct bio *bio;
@@ -727,7 +727,7 @@ static int dex_thread (void *data)
  * Record that we are now using this device.  Returns the previous number
  * of open handles, or <0 in case of error.
  */
-static int dex_get (struct dex_device *dex)
+static int dex_get(struct dex_device *dex)
 {
 	unsigned long flags;
 	int ret = 0;
@@ -756,8 +756,8 @@ static int dex_get (struct dex_device *dex)
  * then it will be destroyed.  Returns the current number of open handles, or
  * <0 if the device was freed.
  */
-static void dex_block_teardown (struct dex_device *dex);
-static int dex_put (struct dex_device *dex)
+static void dex_block_teardown(struct dex_device *dex);
+static int dex_put(struct dex_device *dex)
 {
 	unsigned long flags;
 	int tmp;
@@ -795,9 +795,9 @@ DECLARE_MUTEX(open_release_mutex);
  * Called when our block device is opened.
  */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
-static int dex_open (struct inode *inode, struct file *filp)
+static int dex_open(struct inode *inode, struct file *filp)
 #else
-static int dex_open (struct block_device *bdev, fmode_t mode)
+static int dex_open(struct block_device *bdev, fmode_t mode)
 #endif
 {
 	struct dex_device *dex;
@@ -835,9 +835,9 @@ static int dex_open (struct block_device *bdev, fmode_t mode)
  * Called when our block device is closed.
  */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
-static int dex_release (struct inode *inode, struct file *filp)
+static int dex_release(struct inode *inode, struct file *filp)
 #else
-static int dex_release (struct gendisk *disk, fmode_t mode)
+static int dex_release(struct gendisk *disk, fmode_t mode)
 #endif
 {
 	struct dex_device *dex;
@@ -865,7 +865,7 @@ static int dex_release (struct gendisk *disk, fmode_t mode)
 	return 0;
 }
 
-static int dex_media_changed (struct gendisk *gd)
+static int dex_media_changed(struct gendisk *gd)
 {
 	struct dex_device *dex = gd->private_data;
 	unsigned long flags;
@@ -893,7 +893,7 @@ static struct block_device_operations dex_bdops = {
 /*
  * Set up the block device half of the dex_device structure.
  */
-static int dex_block_setup (struct dex_device *dex)
+static int dex_block_setup(struct dex_device *dex)
 {
 	int ret;
 
@@ -945,7 +945,7 @@ err:
 /*
  * Tear down the block device half of the dex_device structure.
  */
-static void dex_block_teardown (struct dex_device *dex)
+static void dex_block_teardown(struct dex_device *dex)
 {
 	unsigned long flags;
 
@@ -975,7 +975,7 @@ static void dex_block_teardown (struct dex_device *dex)
  * Send as much of our buffer as possible to the tty driver.  This should be
  * called while holding the spinlock.
  */
-static void dex_tty_write (struct dex_device *dex)
+static void dex_tty_write(struct dex_device *dex)
 {
 	int i;
 
@@ -997,7 +997,7 @@ static void dex_tty_write (struct dex_device *dex)
 }
 
 /* Called by the tty driver when data is coming in */
-static void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
+static void dex_receive_buf(struct tty_struct *tty, const unsigned char *buf,
 				char *fp, int count)
 {
 	struct dex_device *dex = tty->disc_data;
@@ -1020,7 +1020,7 @@ static void dex_receive_buf (struct tty_struct *tty, const unsigned char *buf,
 }
 
 /* Called by the tty driver when there's room for sending more data */
-static void dex_write_wakeup (struct tty_struct *tty)
+static void dex_write_wakeup(struct tty_struct *tty)
 {
 	struct dex_device *dex = tty->disc_data;
 	unsigned long flags;
@@ -1035,8 +1035,8 @@ static void dex_write_wakeup (struct tty_struct *tty)
 }
 
 /* Called by the tty driver upon ioctl() */
-int dex_tty_ioctl (struct tty_struct *tty, struct file *file,
-			unsigned int cmd, unsigned long arg)
+static int dex_tty_ioctl(struct tty_struct *tty, struct file *file,
+				unsigned int cmd, unsigned long arg)
 {
 	struct dex_device *dex = tty->disc_data;
 	unsigned long flags;
@@ -1068,7 +1068,7 @@ int dex_tty_ioctl (struct tty_struct *tty, struct file *file,
  * Called by the tty driver when associating a tty with our line discipline.
  * We create and setup a new dex_device.
  */
-static int dex_tty_open (struct tty_struct *tty)
+static int dex_tty_open(struct tty_struct *tty)
 {
 	struct dex_device *dex;
 	int ret, i;
@@ -1109,7 +1109,7 @@ static int dex_tty_open (struct tty_struct *tty)
 /*
  * Called by the tty driver when our line discipline is torn down.
  */
-static void dex_tty_close (struct tty_struct *tty)
+static void dex_tty_close(struct tty_struct *tty)
 {
 	struct dex_device *dex = tty->disc_data;
 	unsigned long flags;
@@ -1143,7 +1143,7 @@ static struct tty_ldisc_ops dex_ldisc = {
 
 /* Module functions */
 
-static void dex_cleanup (void)
+static void dex_cleanup(void)
 {
 	PDEBUG("> dex_cleanup()");
 	if (tty_register_ldisc(ldisc, NULL) != 0)
@@ -1152,7 +1152,7 @@ static void dex_cleanup (void)
 	PDEBUG("< dex_cleanup");
 }
 
-static int __init dex_init (void)
+static int __init dex_init(void)
 {
 	int tmp;
 
