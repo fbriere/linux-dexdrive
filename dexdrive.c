@@ -68,7 +68,7 @@ enum dex_command {
 	DEX_CMD_ON,
 	DEX_CMD_OFF,
 	DEX_CMD_STATUS,
-	DEX_CMD_PAGE	/* Not implemented yet */
+	DEX_CMD_PAGE,	/* TODO: Not implemented yet */
 };
 
 /* List of opcodes */
