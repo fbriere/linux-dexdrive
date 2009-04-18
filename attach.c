@@ -19,7 +19,9 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <getopt.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
@@ -97,13 +99,14 @@ int dex_check(int fd)
 }
 
 /*
- * Set up a tty for communicating with a DexDrive, and set it to the dexdrive
- * line discipline, after making sure that there is a device connected.
+ * Set up a tty for communicating with a DexDrive, and set it to the specified
+ * line discipline (or to DEX_LDISC if ldisc is -1).  If check is true, the
+ * line discipline will only be set after making sure that there is a device
+ * connected.
  */
-int dex_set_tty(int fd)
+int dex_set_tty(int fd, int ldisc, int check)
 {
 	struct termios term, old_term;
-	int ldisc = DEX_LDISC;
 	int errno_bak;
 
 	if (tcgetattr(fd, &old_term) < 0)
@@ -135,16 +138,20 @@ int dex_set_tty(int fd)
 	if (tcsetattr(fd, TCSANOW, &term) < 0)
 		goto err;
 
-	/* Now that we can talk, check whether there's a device attached */
-	switch (dex_check(fd)) {
-	case 0:
-		/* No error, but no device either, so let's fake something */
-		errno = ENXIO;
-	case -1:
-		goto err;
+	if (check) {
+		/* Now that we can talk, check if there's a device attached */
+		switch (dex_check(fd)) {
+		case 0:
+			/* No error, but no device, so let's fake something */
+			errno = ENXIO;
+		case -1:
+			goto err;
+		}
 	}
 	
 	/* Finally set the line discipline */
+	if (ldisc < 0)
+		ldisc = DEX_LDISC;
 	if (ioctl(fd, TIOCSETD, &ldisc) < 0)
 		goto err;
 
@@ -162,6 +169,7 @@ err:
 	return -1;
 }
 
+
 /* Print the block device number associated with a tty */
 void print_dev(int fd)
 {
@@ -173,16 +181,90 @@ void print_dev(int fd)
 	printf("Device number is %u:%u\n", major, minor);
 }
 
+/* For use by usage() */
+char *progname;
+
+const char options[] = "cl:vh";
+const struct option long_options[] = {
+	{ "check",	no_argument,		NULL,	'c' },
+	{ "ldisc",	required_argument,	NULL,	'l' },
+	{ "verbose",	no_argument,		NULL,	'v' },
+	{ "help",	no_argument,		NULL,	'h' },
+	{ 0,		0,			0,	0 }
+};
+
+const char help_msg[] =
+  "Attach a dexdrive block device to a serial port.\n"
+  "\n"
+  "    -c, --check    abort if a DexDrive is not connected\n"
+  "    -l, --ldisc=N  override the default line discipline number\n"
+  "    -v, --verbose  display the major/minor numbers of the created block device\n"
+  "    -h, --help     display this help and exit\n"
+  ;
+
+
+/* Print usage message, and exit with status. */
+void usage(int status)
+{
+	if (status == 0) {
+		/* --help has been called, so be verbose */
+		fprintf(stderr, "Usage: %s [options] <device>\n", progname);
+		fputs(help_msg, stderr);
+	} else {
+		/* getopt() already complained, so be terse */
+		fprintf(stderr, "Try `%s --help' for more information.\n",
+					progname);
+	}
+
+	exit(status);
+}
+
 int main(int argc, char **argv) {
 	char *devname;
 	int fd;
+	int opt;
 
-	if (argc != 2) {
-		fprintf(stderr, "Usage: %s devicename\n", argv[0]);
-		return 1;
+	/* Command-line arguments */
+	int check	= 0;
+	int ldisc	= -1;
+	int verbose	= 0;
+
+	progname = argv[0];
+
+	while ((opt = getopt_long(argc, argv, options, long_options, NULL)) != -1) {
+		switch (opt) {
+		case 'c':
+			check = 1;
+			break;
+		case 'l':
+			ldisc = atoi(optarg);
+			/*
+			 * atoi() does not check for errors, but 0 (N_TTY) is
+			 * not a value that would make any sense anyway.
+			 */
+			if (ldisc == 0) {
+				fprintf(stderr,
+					"%s: invalid --ldisc argument `%s'\n",
+						progname, optarg);
+				usage(1);
+			}
+			break;
+		case 'v':
+			verbose++;
+			break;
+		case 'h':
+			usage(0);
+		default:
+			usage(1);
+		}
 	}
 
-	devname = argv[1];
+	if ((argc - optind) != 1) {
+		fprintf(stderr, "Usage: %s [options] <device>\n", progname);
+		usage(1);
+	}
+
+	devname = argv[optind];
 
         fd = open(devname, O_RDWR | O_NOCTTY | O_NONBLOCK);
 	if (fd < 0) {
@@ -197,12 +279,13 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	if (dex_set_tty(fd) < 0) {
+	if (dex_set_tty(fd, ldisc, check) < 0) {
 		perror("Cannot set line discipline");
 		return 1;
 	}
 
-	print_dev(fd);
+	if (verbose)
+		print_dev(fd);
 
 	pause();
 
