@@ -210,17 +210,14 @@ static void dex_put_i (int i)
 #define lsb(x) ((x) & 0xff)
 #define msb(x) (((x) >> 8) & 0xff)
 
-static inline unsigned char reverse_byte (unsigned char x)
+/*
+ * Reverse the bits in a byte, copied from
+ * <http://graphics.stanford.edu/~seander/bithacks.html#ReverseByteWith32Bits>.
+ */
+static inline unsigned char reverse_byte (unsigned char b)
 {
-	unsigned char res = 0;
-	int i;
-
-	for (i = 0; i < 4; i++) {
-		res |= ((x & (1 << i)) << (7 - (2 * i)));
-		res |= ((x & (1 << (7 - i))) >> (7 - (2 * i)));
-	}
-
-	return res;
+	return ((b * 0x0802LU & 0x22110LU) | (b * 0x8020LU & 0x88440LU))
+		* 0x10101LU >> 16;
 }
 
 static inline unsigned char dex_checksum (unsigned char *ptr, int len)
