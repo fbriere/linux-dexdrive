@@ -19,6 +19,7 @@
 
 
 #include <linux/module.h>
+#include <linux/moduleparam.h>
 #include <linux/init.h>
 
 #include <linux/kernel.h>
@@ -39,15 +40,13 @@
 
 
 #define DEX_NAME	"dexdrive"	/* Driver name */
-#define DEX_MAJOR	251		/* Major device number */
 #define DEX_BUFSIZE_OUT	1024		/* Size of output buffer (min. 261) */
 #define DEX_BUFSIZE_IN	1024		/* Size of input buffer (min. 208) */
 #define DEX_TIMEOUT	100		/* Timeout in msecs when waiting */
 #define DEX_MAX_RETRY	2		/* Maximum number of retries */
 #define DEX_MAX_DEVICES	4		/* Maximum number of devices */
-
-/* Line discipline number -- must be hijacked from include/linux/tty.h */
-#define DEX_LDISC N_X25
+/* The following must currently be hijacked from include/linux/tty.h */
+#define DEX_LDISC	N_X25		/* Default line discipline number */
 
 
 /* DexDrive models */
@@ -103,7 +102,14 @@ enum dex_opcode {
 				"\x90\x49\xf1\xf1\xbb\xe9\xeb"
 
 
-static unsigned int major = DEX_MAJOR;
+static unsigned int major;
+module_param(major, uint, 0);
+MODULE_PARM_DESC(major, "Major device number (automatically assigned by default)");
+
+static int ldisc = DEX_LDISC;
+module_param(ldisc, int, 0);
+MODULE_PARM_DESC(ldisc, "Line discipline number");
+
 
 #define warn(msg, args...) \
 	printk(KERN_WARNING DEX_NAME ": " msg "\n" , ## args)
@@ -1123,7 +1129,7 @@ static struct tty_ldisc dex_ldisc = {
 static void dex_cleanup (void)
 {
 	PDEBUG("> dex_cleanup()");
-	if (tty_register_ldisc(DEX_LDISC, NULL) != 0)
+	if (tty_register_ldisc(ldisc, NULL) != 0)
 		warn("can't unregister ldisc");
 	unregister_blkdev(major, DEX_NAME);
 	PDEBUG("< dex_cleanup");
@@ -1142,7 +1148,7 @@ static int __init dex_init (void)
 		major = tmp;
 	PDEBUG("setting major to %d", major);
 
-	if (tty_register_ldisc(DEX_LDISC, &dex_ldisc) != 0) {
+	if (tty_register_ldisc(ldisc, &dex_ldisc) != 0) {
 		warn("can't set ldisc");
 		dex_cleanup();
 		return -1;
