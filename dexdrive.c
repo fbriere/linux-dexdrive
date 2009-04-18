@@ -26,6 +26,7 @@
 #include <linux/bitmap.h>
 #include <linux/completion.h>
 #include <linux/kthread.h>
+#include <linux/mutex.h>
 #include <linux/slab.h>		/* kmalloc() */
 #include <linux/string.h>	/* memcpy() */
 #include <linux/spinlock.h>
