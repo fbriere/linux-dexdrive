@@ -184,9 +184,10 @@ void print_dev(int fd)
 /* For use by usage() */
 char *progname;
 
-const char options[] = "cl:vh";
+const char options[] = "cDl:vh";
 const struct option long_options[] = {
 	{ "check",	no_argument,		NULL,	'c' },
+	{ "daemon",	no_argument,		NULL,	'D' },
 	{ "ldisc",	required_argument,	NULL,	'l' },
 	{ "verbose",	no_argument,		NULL,	'v' },
 	{ "help",	no_argument,		NULL,	'h' },
@@ -197,6 +198,7 @@ const char help_msg[] =
   "Attach a dexdrive block device to a serial port.\n"
   "\n"
   "    -c, --check    abort if a DexDrive is not connected\n"
+  "    -D, --daemon   fork and run in background\n"
   "    -l, --ldisc=N  override the default line discipline number\n"
   "    -v, --verbose  display the major/minor numbers of the created block device\n"
   "    -h, --help     display this help and exit\n"
@@ -226,6 +228,7 @@ int main(int argc, char **argv) {
 
 	/* Command-line arguments */
 	int check	= 0;
+	int is_daemon	= 0;
 	int ldisc	= -1;
 	int verbose	= 0;
 
@@ -235,6 +238,9 @@ int main(int argc, char **argv) {
 		switch (opt) {
 		case 'c':
 			check = 1;
+			break;
+		case 'D':
+			is_daemon = 1;
 			break;
 		case 'l':
 			ldisc = atoi(optarg);
@@ -286,6 +292,13 @@ int main(int argc, char **argv) {
 
 	if (verbose)
 		print_dev(fd);
+
+	if (is_daemon) {
+		if (daemon(0, 0) < 0) {
+			perror("Cannot run in daemon");
+			return 1;
+		}
+	}
 
 	pause();
 
