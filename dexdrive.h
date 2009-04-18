@@ -23,6 +23,14 @@
 #include <linux/ioctl.h>
 
 /*
+ * Line discipline number reserved for our own purposes.  Unfortunately, it's
+ * not possible to add such a number, so an existing one must be hijacked from
+ * include/linux/tty.h for the time being.
+ */
+#define DEX_LDISC	N_X25		/* Default line discipline number */
+
+
+/*
  * This defines a series of ioctl() requests specific to this driver.
  */
 

@@ -8,7 +8,6 @@
 
 #include "dexdrive.h"
 
-#define DEX_LDISC N_X25
 #define DEX_BAUD  B38400
 #define DEX_TIMEOUT 50000
 #define DEX_GARBAGE "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"

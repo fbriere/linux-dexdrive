@@ -46,8 +46,6 @@
 #define DEX_TIMEOUT	100		/* Timeout in msecs when waiting */
 #define DEX_MAX_RETRY	2		/* Maximum number of retries */
 #define DEX_MAX_DEVICES	4		/* Maximum number of devices */
-/* The following must currently be hijacked from include/linux/tty.h */
-#define DEX_LDISC	N_X25		/* Default line discipline number */
 
 
 /* DexDrive models */
@@ -107,6 +105,7 @@ static unsigned int major;
 module_param(major, uint, 0);
 MODULE_PARM_DESC(major, "Major device number (automatically assigned by default)");
 
+/* This must be configurable until the day we get our own value */
 static int ldisc = DEX_LDISC;
 module_param(ldisc, int, 0);
 MODULE_PARM_DESC(ldisc, "Line discipline number");
