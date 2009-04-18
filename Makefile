@@ -25,7 +25,7 @@ all: attach
 attach dexdrive.o: dexdrive.h
 
 clean:
-	rm -rf *.o *~ core .*.cmd *.ko *.mod.c .tmp_versions Module.markers Module.symvers modules.order
+	rm -rf *.o *~ core .*.cmd *.ko *.mod.c .tmp_versions Module.markers Module.symvers modules.order attach
 
 .PHONY:	all modules clean
 
