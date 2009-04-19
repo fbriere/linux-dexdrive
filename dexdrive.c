@@ -148,8 +148,6 @@ struct dex_device {
 	/* pointer to the next byte to be written */
 	char *ptr_out;
 
-	/* media change detected, waiting to be reported via media_changed() */
-	int media_changed;
 	/* model: PSX or N64 */
 	enum dex_model model;
 
@@ -351,7 +349,6 @@ static int dex_read_cmd(struct dex_device *dex)
 	case mkpair(DEX_CMD_READ, DEX_OPCODE_NOCARD):
 	case mkpair(DEX_CMD_SEEK, DEX_OPCODE_NOCARD):
 	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_NOCARD):
-		dex->media_changed = 1;
 		return -EIO;
 	case mkpair(DEX_CMD_INIT, DEX_OPCODE_ID):
 		if (n_args < 5) return 0;
@@ -362,7 +359,6 @@ static int dex_read_cmd(struct dex_device *dex)
 	case mkpair(DEX_CMD_OFF, DEX_OPCODE_NOCARD):
 		return 1;
 	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_NOCARD):
-		dex->media_changed = 1;
 		return -ENXIO;
 	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_CARD):
 	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_CARD_NEW):
@@ -812,9 +808,15 @@ static int dex_open(struct block_device *bdev, fmode_t mode)
 	ret = dex_get(dex);
 
 	/* Initialize the device if we are the first to open it */
-	if (ret == 0)
+	if (ret == 0) {
 		/* FIXME: Wait for dex_thread to empty its queue */
 		ret = dex_spin_up(dex);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
+		check_disk_change(inode->i_bdev);
+#else
+		check_disk_change(bdev);
+#endif
+	}
 
 	if (ret < 0)
 		dex_put(dex);
@@ -860,22 +862,18 @@ static int dex_release(struct gendisk *disk, fmode_t mode)
 	return 0;
 }
 
+/*
+ * Called by our own call to check_disk_change() in dex_open().
+ *
+ * It is somewhat unclear what we should do in our case, where we have a
+ * removable media, but cannot tell if it has been changed.  The safest
+ * option is probably to always return true, which is what we do.  And
+ * since check_disk_change() only checks for true/false, we symbolically
+ * return an error value.
+ */
 static int dex_media_changed(struct gendisk *gd)
 {
-	struct dex_device *dex = gd->private_data;
-	unsigned long flags;
-	int tmp;
-
-	PDEBUG("> dex_media_changed(%p)", gd);
-
-	spin_lock_irqsave(&dex->lock, flags);
-	tmp = dex->media_changed;
-	dex->media_changed = 0;
-	spin_unlock_irqrestore(&dex->lock, flags);
-
-	PDEBUG("< dex_media_changed := %d", tmp);
-
-	return tmp;
+	return -EINVAL;
 }
 
 static struct block_device_operations dex_bdops = {
@@ -1087,7 +1085,6 @@ static int dex_tty_open(struct tty_struct *tty)
 	dex->tty = tty;
 	dex->open_count = 1;
 	dex->command = DEX_CMD_NONE;
-	dex->media_changed = 0;
 
 	tty->disc_data = dex;
 	tty->receive_room = DEX_BUFSIZE_IN;
