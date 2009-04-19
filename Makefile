@@ -1,29 +1,36 @@
 #!/usr/bin/make -f
 
 ifneq ($(KERNELRELEASE),)
-# call from kernel build system
+# Call from kernel build system
 
 obj-m := dexdrive.o
 
 else
+# Normal Makefile
 
-CFLAGS += -O2 -g -Wall
+
+CFLAGS = -O2 -g -Wall
 
 KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 PWD       := $(shell pwd)
 
-modules:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
 
-endif
-
-
-all: attach
+all: attach modules
 
 attach: dexdrive.h
 
+modules:
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
+
 clean:
-	rm -rf *.o *~ core .*.cmd *.ko *.mod.c .tmp_versions Module.markers Module.symvers modules.order attach
+	rm -rf attach
+	-$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
+	# These are left behind by the Linux Makefile
+	rm -f Module.markers modules.order
+
 
 .PHONY:	all modules clean
+
+endif
+
 
