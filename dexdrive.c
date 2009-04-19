@@ -464,8 +464,18 @@ static void dex_check_reply(struct dex_device *dex)
 /*
  * Send a command to the device and wait until the response has been
  * processed.  Returns <0 in case of an error.
+ *
+ * The meaning of n and *ptr are specific to each command:
+ *
+ *   - For DEX_CMD_SEEK (N64) and DEX_CMD_READ/WRITE (PSX), n contains the
+ *     sector number.
+ *   - For DEX_CMD_READ/WRITE (both models), the sector data will be read
+ *     from or written to *ptr.
+ *   - For DEX_CMD_INIT, the 5-byte ID reply will be stored in *ptr.
+ *
+ * Otherwise, these arguments are not used.
  */
-static int dex_do_cmd(struct dex_device *dex, int cmd)
+static int dex_do_cmd(struct dex_device *dex, int cmd, int n, void *ptr)
 {
 	unsigned long flags;
 	int ret, i;
@@ -481,6 +491,8 @@ static int dex_do_cmd(struct dex_device *dex, int cmd)
 	}
 
 	dex->command = cmd;
+	dex->sector = n;
+	dex->data = ptr;
 
 	for (i = 0; i <= DEX_MAX_RETRY; i++) {
 		PDEBUG(" Attempt #%i", i);
@@ -514,16 +526,15 @@ static int dex_transfer(struct dex_device *dex,
 					buffer, write);
 
 	for (; len > 0; sector++, len--) {
-		dex->sector = sector;
-		dex->data = buffer;
-
 		if (write && (dex->model == DEX_MODEL_N64)) {
-			error = dex_do_cmd(dex, DEX_CMD_SEEK);
+			error = dex_do_cmd(dex, DEX_CMD_SEEK, sector, NULL);
 			if (error < 0)
 				break;
 		}
 
-		error = dex_do_cmd(dex, write ? DEX_CMD_WRITE : DEX_CMD_READ);
+		error = dex_do_cmd(dex,
+					(write ? DEX_CMD_WRITE : DEX_CMD_READ),
+					sector, buffer);
 
 		if (error < 0)
 			break;
@@ -547,8 +558,7 @@ static int dex_spin_up(struct dex_device *dex)
 
 	PDEBUG("> dex_spin_up(%p)", dex);
 
-	dex->data = init_data;
-	ret = dex_do_cmd(dex, DEX_CMD_INIT);
+	ret = dex_do_cmd(dex, DEX_CMD_INIT, 0, init_data);
 	if (ret < 0)
 		return ret;
 
@@ -564,11 +574,11 @@ static int dex_spin_up(struct dex_device *dex)
 	/* A regular PSX memory card holds 128 KiB; a N64 card holds 32 KiB */
 	set_capacity(dex->gd, (dex->model == DEX_MODEL_PSX ? 128 : 32) * 2);
 
-	ret = dex_do_cmd(dex, DEX_CMD_MAGIC);
+	ret = dex_do_cmd(dex, DEX_CMD_MAGIC, 0, NULL);
 	if (ret < 0)
 		return ret;
 
-	ret = dex_do_cmd(dex, DEX_CMD_STATUS);
+	ret = dex_do_cmd(dex, DEX_CMD_STATUS, 0, NULL);
 	if (ret < 0)
 		return ret;
 
@@ -576,7 +586,7 @@ static int dex_spin_up(struct dex_device *dex)
 
 	/* Don't bother turning on the light if no card is present */
 	if (ret == 0)
-		dex_do_cmd(dex, DEX_CMD_ON);
+		dex_do_cmd(dex, DEX_CMD_ON, 0, NULL);
 
 	return ret;
 }
@@ -586,7 +596,7 @@ static int dex_spin_up(struct dex_device *dex)
  */
 static void dex_spin_down(struct dex_device *dex)
 {
-	dex_do_cmd(dex, DEX_CMD_OFF);
+	dex_do_cmd(dex, DEX_CMD_OFF, 0, NULL);
 }
 
 
