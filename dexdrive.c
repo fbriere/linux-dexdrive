@@ -52,10 +52,6 @@
 /* DexDrive models */
 enum dex_model { DEX_MODEL_PSX, DEX_MODEL_N64 };
 
-/* PSX sectors have 256 bytes; N64 sectors, 512 */
-#define dex_sector_shift(dex) ((dex)->model == DEX_MODEL_PSX ? 7 : 8)
-#define dex_sector_size(dex) (1 << dex_sector_shift(dex))
-
 /* List of operations we perform with the device */
 enum dex_command {
 	DEX_CMD_NONE,
@@ -198,15 +194,34 @@ static void dex_put_i(int i)
 
 /* Low-level functions */
 
-#define add2bufc(dex, c) \
-	do { dex->buf_out[dex->count_out] = c; dex->count_out++; } while (0)
+/*
+ * Split a 16-bit sector number into two bytes, for use as argument to
+ * SEEK/READ/WRITE, and for computing the checksum on READ.
+ */
 
-#define add2bufs(dex, s, n) \
-	do { memcpy(dex->buf_out + dex->count_out, s, n); \
-			dex->count_out += n; } while (0)
+static inline unsigned char lsb(int x)
+{
+	return x;
+}
 
-#define lsb(x) ((x) & 0xff)
-#define msb(x) (((x) >> 8) & 0xff)
+static inline unsigned char msb(int x)
+{
+	return (x >> 8);
+}
+
+/*
+ * PSX sectors have 256 bytes; N64 sectors, 512
+ */
+
+static inline int dex_sector_shift(const struct dex_device *dex)
+{
+	return (dex->model == DEX_MODEL_PSX ? 7 : 8);
+}
+
+static inline int dex_sector_size(const struct dex_device *dex)
+{
+	return (1 << dex_sector_shift(dex));
+}
 
 /*
  * Reverse the bits in a byte, copied from
@@ -227,6 +242,19 @@ static inline unsigned char dex_checksum(unsigned char *ptr, int len)
 		res ^= ptr[i];
 
 	return res;
+}
+
+/* Add a character to dex->buf_out[] */
+static inline void add2bufc(struct dex_device *dex, char c)
+{
+	dex->buf_out[dex->count_out++] = c;
+}
+
+/* Add a string to dex->buf_out[] */
+static inline void add2bufs(struct dex_device *dex, const char *str, int len)
+{
+	memcpy(dex->buf_out + dex->count_out, str, len);
+	dex->count_out += len;
 }
 
 
