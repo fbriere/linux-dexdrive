@@ -363,7 +363,7 @@ static int dex_read_cmd(struct dex_device *dex)
 		return 1;
 	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_NOCARD):
 		dex->media_changed = 1;
-		return 1;
+		return -ENXIO;
 	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_CARD):
 	case mkpair(DEX_CMD_STATUS, DEX_OPCODE_CARD_NEW):
 		if ((dex->model == DEX_MODEL_PSX) && (n_args < 1))
@@ -572,14 +572,9 @@ static int dex_spin_up(struct dex_device *dex)
 	if (ret < 0)
 		return ret;
 
-	/* Make sure we get a fresh value for this flag */
-	dex->media_changed = 0;
-
 	ret = dex_do_cmd(dex, DEX_CMD_STATUS);
 	if (ret < 0)
 		return ret;
-
-	ret = (dex->media_changed ? -ENXIO : 0);
 
 	PDEBUG("< dex_spin_up := %i", ret);
 
