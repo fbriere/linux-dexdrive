@@ -1,7 +1,5 @@
 #!/usr/bin/make -f
 
-EXTRA_CFLAGS = -O -g -Wall
-
 ifneq ($(KERNELRELEASE),)
 # call from kernel build system
 
@@ -22,7 +20,7 @@ endif
 
 all: attach
 
-attach dexdrive.o: dexdrive.h
+attach: dexdrive.h
 
 clean:
 	rm -rf *.o *~ core .*.cmd *.ko *.mod.c .tmp_versions Module.markers Module.symvers modules.order attach
