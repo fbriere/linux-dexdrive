@@ -932,8 +932,19 @@ static int dex_block_setup(struct dex_device *dex)
 	if (!dex->request_queue)
 		return -ENOMEM;
 
+	blk_queue_hardsect_size(dex->request_queue, 512);
+
 	dex->request_queue->queuedata = dex;
 	blk_queue_make_request(dex->request_queue, dex_make_request);
+
+	/*
+	 * Turn off readahead, which doesn't do us much good.  (The default
+	 * value is 256 sectors, which basically gobbles up the whole card
+	 * on any read operation.)  A small value might be useful, but the
+	 * unit is PAGE_CACHE_SIZE (4 KiB or more), which is still too big
+	 * for our purposes.
+	 */
+	dex->request_queue->backing_dev_info.ra_pages = 0;
 
 	dex->bio_head = dex->bio_tail = NULL;
 
