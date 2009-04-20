@@ -237,7 +237,7 @@ static inline unsigned char reverse_byte(unsigned char b)
 		* 0x10101LU >> 16;
 }
 
-static inline unsigned char dex_checksum(unsigned char *ptr, int len)
+static inline unsigned char dex_checksum(const unsigned char *ptr, int len)
 {
 	unsigned char res = 0;
 	int i;
