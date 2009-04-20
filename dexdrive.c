@@ -41,9 +41,13 @@
 #include "dexdrive.h"
 
 
+/*
+ * The maximum message length is 261, during READ/WRITE for the N64 model:
+ *   I A I <opcode> <256 bytes of data> <checksum>.
+ * (Although PAGE replies can be much longer than this.)
+ */
 #define DEX_NAME	"dexdrive"	/* Driver name */
-#define DEX_BUFSIZE_OUT	1024		/* Size of output buffer (min. 261) */
-#define DEX_BUFSIZE_IN	1024		/* Size of input buffer (min. 208) */
+#define DEX_BUFSIZE	261		/* Size of input/output buffer */
 #define DEX_TIMEOUT	100		/* Timeout in msecs when waiting */
 #define DEX_MAX_RETRY	2		/* Maximum number of retries */
 #define DEX_MAX_DEVICES	4		/* Maximum number of devices */
@@ -137,8 +141,8 @@ struct dex_device {
 	struct completion command_done;
 	/* return value of command */
 	int command_return;
-	/* input and output buffers */
-	char buf_in[DEX_BUFSIZE_IN], buf_out[DEX_BUFSIZE_OUT];
+	/* input/output buffer */
+	char buf[DEX_BUFSIZE];
 	/* number of bytes read / to write */
 	int count_in, count_out;
 	/* pointer to the next byte to be written */
@@ -244,22 +248,22 @@ static inline unsigned char dex_checksum(unsigned char *ptr, int len)
 	return res;
 }
 
-/* Add a character to dex->buf_out[] */
+/* Add a character to dex->buf[] */
 static inline void add2bufc(struct dex_device *dex, char c)
 {
-	dex->buf_out[dex->count_out++] = c;
+	dex->buf[dex->count_out++] = c;
 }
 
-/* Add a string to dex->buf_out[] */
+/* Add a string to dex->buf[] */
 static inline void add2bufs(struct dex_device *dex, const char *str, int len)
 {
-	memcpy(dex->buf_out + dex->count_out, str, len);
+	memcpy(dex->buf + dex->count_out, str, len);
 	dex->count_out += len;
 }
 
 
 /*
- * Fills buf_out with the data that will be sent to the device.  Returns <0
+ * Fills dex->buf[] with the data that will be sent to the device.  Returns <0
  * in case of error.
  */
 static int dex_prepare_cmd(struct dex_device *dex)
@@ -293,7 +297,7 @@ static int dex_prepare_cmd(struct dex_device *dex)
 			add2bufc(dex, reverse_byte(lsb(dex->sector)));
 		}
 		add2bufs(dex, dex->data, dex_sector_size(dex));
-		add2bufc(dex, dex_checksum((dex->buf_out + 4), (dex->count_out - 4)));
+		add2bufc(dex, dex_checksum((dex->buf + 4), (dex->count_out - 4)));
 		break;
 	case DEX_CMD_INIT:
 		add2bufc(dex, DEX_OPCODE_INIT);
@@ -324,14 +328,14 @@ static int dex_prepare_cmd(struct dex_device *dex)
 }
 
 /*
- * Processes what has already been received in buf_in.  Returns >0 if the
+ * Processes what has already been received in dex->buf[].  Returns >0 if the
  * response has been processed, 0 if is currently incomplete, and <0 if there
  * was an error.
  */
 #define mkpair(req, reply) (((req) << 8) | (reply))
 static int dex_read_cmd(struct dex_device *dex)
 {
-	int reply = dex->buf_in[3];
+	int reply = dex->buf[3];
 	int n_args = dex->count_in - 4;
 
 	PDEBUG("> dex_read_cmd(%p) [ reply:%i n_args:%i ]", dex, reply, n_args);
@@ -364,11 +368,11 @@ static int dex_read_cmd(struct dex_device *dex)
 	case mkpair(DEX_CMD_READ, DEX_OPCODE_DATA):
 		if (n_args < (dex_sector_size(dex) + 1))
 			return 0;
-		if ((dex_checksum((dex->buf_in + 4), (dex_sector_size(dex) + 1))
+		if ((dex_checksum((dex->buf + 4), (dex_sector_size(dex) + 1))
 			^ lsb(dex->sector) ^ msb(dex->sector)) != 0) {
 			return -EIO;
 		}
-		memcpy(dex->data, (dex->buf_in + 4), dex_sector_size(dex));
+		memcpy(dex->data, (dex->buf + 4), dex_sector_size(dex));
 		return 1;
 	case mkpair(DEX_CMD_SEEK, DEX_OPCODE_SEEK_OK):
 	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_WOK):
@@ -380,7 +384,7 @@ static int dex_read_cmd(struct dex_device *dex)
 		return -EIO;
 	case mkpair(DEX_CMD_INIT, DEX_OPCODE_ID):
 		if (n_args < 5) return 0;
-		memcpy(dex->data, (dex->buf_in + 4), 5);
+		memcpy(dex->data, (dex->buf + 4), 5);
 		return 1;
 	case mkpair(DEX_CMD_MAGIC, DEX_OPCODE_NOCARD):
 	case mkpair(DEX_CMD_ON, DEX_OPCODE_NOCARD):
@@ -418,7 +422,7 @@ static int dex_attempt_cmd(struct dex_device *dex, unsigned long *flags)
 	if (dex_prepare_cmd(dex) < 0)
 		return -EIO;
 
-	dex->ptr_out = dex->buf_out;
+	dex->ptr_out = dex->buf;
 	dex_tty_write(dex);
 
 	dex->count_in = 0;
@@ -1048,12 +1052,20 @@ static void dex_receive_buf(struct tty_struct *tty, const unsigned char *buf,
 	PDEBUG("> dex_receive_buf(%p, %p, %p, %u)", tty, buf, fp, count);
 
 	spin_lock_irqsave(&dex->lock, flags);
-	if (count > DEX_BUFSIZE_IN - dex->count_in) {
-		warn("Input buffer overflowing");
-		count = DEX_BUFSIZE_IN - dex->count_in;
+
+	if (dex->count_out > 0) {
+		warn("Ignoring received data while we're still sending");
+		goto out;
 	}
-	memcpy(dex->buf_in + dex->count_in, buf, count);
+
+	if (count > DEX_BUFSIZE - dex->count_in) {
+		warn("Input buffer overflowing");
+		count = DEX_BUFSIZE - dex->count_in;
+	}
+	memcpy(dex->buf + dex->count_in, buf, count);
 	dex->count_in += count;
+
+out:
 	spin_unlock_irqrestore(&dex->lock, flags);
 
 	dex_check_reply(dex);
@@ -1136,7 +1148,7 @@ static int dex_tty_open(struct tty_struct *tty)
 	dex->command = DEX_CMD_NONE;
 
 	tty->disc_data = dex;
-	tty->receive_room = DEX_BUFSIZE_IN;
+	tty->receive_room = DEX_BUFSIZE;
 
 	if ((ret = dex_block_setup(dex)) < 0) {
 		kfree(dex);
