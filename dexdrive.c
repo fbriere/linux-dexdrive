@@ -745,14 +745,14 @@ static DEVICE_ATTR(firmware_version, S_IRUGO, dex_show_firmware_version, NULL);
 /*
  * Handle a pending block IO operation.
  */
-static inline void dex_handle_bio(struct dex_device *dex, struct bio *bio)
+static inline void dex_block_do_bio(struct dex_device *dex, struct bio *bio)
 {
 	sector_t sector;
 	struct bio_vec *bvec;
 	int i;
 	int error = 0;
 
-	PDEBUG(">> dex_handle_bio(%p, %p)", dex, bio);
+	PDEBUG(">> dex_block_do_bio(%p, %p)", dex, bio);
 
 	sector = bio->bi_sector << (9 - dex_sector_shift(dex));
 
@@ -771,13 +771,13 @@ static inline void dex_handle_bio(struct dex_device *dex, struct bio *bio)
 
 	bio_endio(bio, error);
 
-	PDEBUG("<< dex_handle_bio");
+	PDEBUG("<< dex_block_do_bio");
 }
 
 /*
  * Add a bio to the queue -- must be called while holding the spinlock.
  */
-static void dex_add_bio(struct dex_device *dex, struct bio *bio)
+static void dex_block_add_bio(struct dex_device *dex, struct bio *bio)
 {
 	if (dex->bio_tail)
 		dex->bio_tail->bi_next = bio;
@@ -790,7 +790,7 @@ static void dex_add_bio(struct dex_device *dex, struct bio *bio)
 /*
  * Remove a bio from the queue -- must be called while holding the spinlock.
  */
-static struct bio *dex_get_bio(struct dex_device *dex)
+static struct bio *dex_block_get_bio(struct dex_device *dex)
 {
 	struct bio *bio;
 
@@ -806,14 +806,14 @@ static struct bio *dex_get_bio(struct dex_device *dex)
 
 /*
  * Called by the kernel when a new block IO operation is created, which we
- * add to the queue for dex_thread() to handle.
+ * add to the queue for dex_block_thread() to handle.
  */
-static int dex_make_request(struct request_queue *queue, struct bio *bio)
+static int dex_block_make_request(struct request_queue *queue, struct bio *bio)
 {
 	struct dex_device *dex = queue->queuedata;
 	unsigned long flags;
 
-	PDEBUG("> dex_make_request(%p, %p)", queue, bio);
+	PDEBUG("> dex_block_make_request(%p, %p)", queue, bio);
 
 	if (!dex) {
 		/* We are shutting down -- drop everything on the floor */
@@ -822,26 +822,26 @@ static int dex_make_request(struct request_queue *queue, struct bio *bio)
 	}
 
 	spin_lock_irqsave(&dex->lock, flags);
-	dex_add_bio(dex, bio);
+	dex_block_add_bio(dex, bio);
 	wake_up(&dex->thread_wait);
 	spin_unlock_irqrestore(&dex->lock, flags);
 
-	PDEBUG("< dex_make_request");
+	PDEBUG("< dex_block_make_request");
 
 	return 0;
 }
 
 /*
  * A kernel thread dedicated to processing bio's; it merely waits for more to
- * appear on the stack, and dispatches them to dex_handle_bio().
+ * appear on the stack, and dispatches them to dex_block_do_bio().
  */
-static int dex_thread(void *data)
+static int dex_block_thread(void *data)
 {
 	struct dex_device *dex = data;
 	struct bio *bio;
 	unsigned long flags;
 
-	PDEBUG(">> dex_thread starting");
+	PDEBUG(">> dex_block_thread starting");
 
 	/* set_user_nice(current, -20); */
 
@@ -853,13 +853,13 @@ static int dex_thread(void *data)
 			continue;
 
 		spin_lock_irqsave(&dex->lock, flags);
-		bio = dex_get_bio(dex);
+		bio = dex_block_get_bio(dex);
 		spin_unlock_irqrestore(&dex->lock, flags);
 
-		dex_handle_bio(dex, bio);
+		dex_block_do_bio(dex, bio);
 	}
 
-	PDEBUG("<< dex_thread exiting");
+	PDEBUG("<< dex_block_thread exiting");
 
 	return 0;
 }
@@ -876,12 +876,12 @@ DECLARE_MUTEX(open_release_mutex);
 /*
  * Called when our block device is opened.
  */
-static int dex_open(COMPAT_OPEN_PARAMS)
+static int dex_block_open(COMPAT_OPEN_PARAMS)
 {
 	struct dex_device *dex;
 	int ret;
 
-	PDEBUG("> dex_open(...)");
+	PDEBUG("> dex_block_open(...)");
 
 	if (down_interruptible(&open_release_mutex))
 		return -ERESTARTSYS;
@@ -892,7 +892,7 @@ static int dex_open(COMPAT_OPEN_PARAMS)
 
 	/* Initialize the device if we are the first to open it */
 	if (ret == 0) {
-		/* FIXME: Wait for dex_thread to empty its queue */
+		/* FIXME: Wait for dex_block_thread to empty its queue */
 		ret = dex_spin_up(dex);
 		if (ret < 0)
 			goto out;
@@ -918,7 +918,7 @@ out:
 
 	up(&open_release_mutex);
 
-	PDEBUG("< dex_open := %d", ret);
+	PDEBUG("< dex_block_open := %d", ret);
 
 	return ret;
 }
@@ -926,11 +926,11 @@ out:
 /*
  * Called when our block device is closed.
  */
-static int dex_release(COMPAT_RELEASE_PARAMS)
+static int dex_block_release(COMPAT_RELEASE_PARAMS)
 {
 	struct dex_device *dex;
 
-	PDEBUG("> dex_release(...)");
+	PDEBUG("> dex_block_release(...)");
 
 	if (down_interruptible(&open_release_mutex))
 		return -ERESTARTSYS;
@@ -950,12 +950,12 @@ static int dex_release(COMPAT_RELEASE_PARAMS)
 
 	up(&open_release_mutex);
 
-	PDEBUG("< dex_release := %d", 0);
+	PDEBUG("< dex_block_release := %d", 0);
 	return 0;
 }
 
 /*
- * Called by our own call to check_disk_change() in dex_open().
+ * Called by our own call to check_disk_change() in dex_block_open().
  *
  * It is somewhat unclear what we should do in our case, where we have a
  * removable media, but cannot tell if it has been changed.  The safest
@@ -963,16 +963,16 @@ static int dex_release(COMPAT_RELEASE_PARAMS)
  * since check_disk_change() only checks for true/false, we symbolically
  * return an error value.
  */
-static int dex_media_changed(struct gendisk *gd)
+static int dex_block_media_changed(struct gendisk *gd)
 {
 	return -EINVAL;
 }
 
 static struct block_device_operations dex_bdops = {
 	.owner			= THIS_MODULE,
-	.open			= dex_open,
-	.release		= dex_release,
-	.media_changed		= dex_media_changed,
+	.open			= dex_block_open,
+	.release		= dex_block_release,
+	.media_changed		= dex_block_media_changed,
 };
 
 /*
@@ -989,7 +989,7 @@ static int dex_block_setup(struct dex_device *dex)
 	blk_queue_hardsect_size(dex->request_queue, 512);
 
 	dex->request_queue->queuedata = dex;
-	blk_queue_make_request(dex->request_queue, dex_make_request);
+	blk_queue_make_request(dex->request_queue, dex_block_make_request);
 
 	/*
 	 * Turn off readahead, which doesn't do us much good.  (The default
@@ -1003,7 +1003,7 @@ static int dex_block_setup(struct dex_device *dex)
 	dex->bio_head = dex->bio_tail = NULL;
 
 	init_waitqueue_head(&dex->thread_wait);
-	dex->thread = kthread_run(dex_thread, dex, "dexdrive%d", dex->i);
+	dex->thread = kthread_run(dex_block_thread, dex, "dexdrive%d", dex->i);
 
 	if (IS_ERR(dex->thread)) {
 		warn("cannot create thread");
@@ -1053,7 +1053,7 @@ static void dex_block_teardown(struct dex_device *dex)
 
 	del_gendisk(dex->gd);
 
-	/* Tell dex_make_request() to refuse any new bio's */
+	/* Tell dex_block_make_request() to refuse any new bio's */
 	spin_lock_irqsave(&dex->lock, flags);
 	dex->request_queue->queuedata = NULL;
 	spin_unlock_irqrestore(&dex->lock, flags);
@@ -1098,13 +1098,13 @@ static void dex_tty_write(struct dex_device *dex)
 }
 
 /* Called by the tty driver when data is coming in */
-static void dex_receive_buf(struct tty_struct *tty, const unsigned char *buf,
-				char *fp, int count)
+static void dex_tty_receive_buf(struct tty_struct *tty,
+				const unsigned char *buf, char *fp, int count)
 {
 	struct dex_device *dex = tty->disc_data;
 	unsigned long flags;
 
-	PDEBUG("> dex_receive_buf(%p, %p, %p, %u)", tty, buf, fp, count);
+	PDEBUG("> dex_tty_receive_buf(%p, %p, %p, %u)", tty, buf, fp, count);
 
 	spin_lock_irqsave(&dex->lock, flags);
 
@@ -1125,22 +1125,22 @@ out:
 
 	dex_check_reply(dex);
 
-	PDEBUG("< dex_receive_buf");
+	PDEBUG("< dex_tty_receive_buf");
 }
 
 /* Called by the tty driver when there's room for sending more data */
-static void dex_write_wakeup(struct tty_struct *tty)
+static void dex_tty_write_wakeup(struct tty_struct *tty)
 {
 	struct dex_device *dex = tty->disc_data;
 	unsigned long flags;
 
-	PDEBUG("> dex_write_wakeup(%p)", tty);
+	PDEBUG("> dex_tty_write_wakeup(%p)", tty);
 
 	spin_lock_irqsave(&dex->lock, flags);
 	dex_tty_write(dex);
 	spin_unlock_irqrestore(&dex->lock, flags);
 
-	PDEBUG("< dex_write_wakeup");
+	PDEBUG("< dex_tty_write_wakeup");
 }
 
 /* Called by the tty driver upon ioctl() */
@@ -1241,8 +1241,8 @@ static struct tty_ldisc_ops dex_ldisc = {
 	.open		= dex_tty_open,
 	.close		= dex_tty_close,
 	.ioctl		= dex_tty_ioctl,
-	.receive_buf	= dex_receive_buf,
-	.write_wakeup	= dex_write_wakeup,
+	.receive_buf	= dex_tty_receive_buf,
+	.write_wakeup	= dex_tty_write_wakeup,
 };
 
 
