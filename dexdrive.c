@@ -21,7 +21,6 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
-#include <linux/version.h>
 
 #include <linux/kernel.h>
 #include <linux/bitmap.h>
@@ -39,6 +38,7 @@
 #include <linux/tty_ldisc.h>
 
 #include "dexdrive.h"
+#include "compat.h"
 
 
 /*
@@ -827,11 +827,7 @@ DECLARE_MUTEX(open_release_mutex);
 /*
  * Called when our block device is opened.
  */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
-static int dex_open(struct inode *inode, struct file *filp)
-#else
-static int dex_open(struct block_device *bdev, fmode_t mode)
-#endif
+static int dex_open(COMPAT_OPEN_PARAMS)
 {
 	struct dex_device *dex;
 	int ret;
@@ -841,11 +837,7 @@ static int dex_open(struct block_device *bdev, fmode_t mode)
 	if (down_interruptible(&open_release_mutex))
 		return -ERESTARTSYS;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
-	dex = inode->i_bdev->bd_disk->private_data;
-#else
-	dex = bdev->bd_disk->private_data;
-#endif
+	dex = compat_open_get_disk()->private_data;
 
 	ret = dex_get(dex);
 
@@ -853,11 +845,7 @@ static int dex_open(struct block_device *bdev, fmode_t mode)
 	if (ret == 0) {
 		/* FIXME: Wait for dex_thread to empty its queue */
 		ret = dex_spin_up(dex);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
-		check_disk_change(inode->i_bdev);
-#else
-		check_disk_change(bdev);
-#endif
+		check_disk_change(compat_open_get_bdev());
 	}
 
 	if (ret < 0)
@@ -873,11 +861,7 @@ static int dex_open(struct block_device *bdev, fmode_t mode)
 /*
  * Called when our block device is closed.
  */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
-static int dex_release(struct inode *inode, struct file *filp)
-#else
-static int dex_release(struct gendisk *disk, fmode_t mode)
-#endif
+static int dex_release(COMPAT_RELEASE_PARAMS)
 {
 	struct dex_device *dex;
 
@@ -886,11 +870,7 @@ static int dex_release(struct gendisk *disk, fmode_t mode)
 	if (down_interruptible(&open_release_mutex))
 		return -ERESTARTSYS;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
-	dex = inode->i_bdev->bd_disk->private_data;
-#else
-	dex = disk->private_data;
-#endif
+	dex = compat_release_get_disk()->private_data;
 
 	/* FIXME: Yuck */
 	if (dex->tty && dex->open_count == 2)
@@ -1179,9 +1159,6 @@ static void dex_tty_close(struct tty_struct *tty)
 	PDEBUG("< dex_tty_close");
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,27)
-# define tty_ldisc_ops tty_ldisc
-#endif
 static struct tty_ldisc_ops dex_ldisc = {
 	.magic		= TTY_LDISC_MAGIC,
 	.owner		= THIS_MODULE,
