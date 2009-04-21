@@ -1234,7 +1234,7 @@ static void dex_tty_close(struct tty_struct *tty)
 	PDEBUG("< dex_tty_close");
 }
 
-static struct tty_ldisc_ops dex_ldisc = {
+static struct tty_ldisc_ops dex_ldisc_ops = {
 	.magic		= TTY_LDISC_MAGIC,
 	.owner		= THIS_MODULE,
 	.name		= DEX_NAME,
@@ -1270,7 +1270,7 @@ static int __init dex_init(void)
 		major = tmp;
 	PDEBUG("setting major to %d", major);
 
-	if (tty_register_ldisc(ldisc, &dex_ldisc) != 0) {
+	if (tty_register_ldisc(ldisc, &dex_ldisc_ops) != 0) {
 		warn("can't set ldisc");
 		dex_cleanup();
 		return -1;
