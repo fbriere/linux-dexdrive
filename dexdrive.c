@@ -938,8 +938,13 @@ static int dex_release(COMPAT_RELEASE_PARAMS)
 	dex = compat_release_get_disk()->private_data;
 
 	/* FIXME: Yuck */
-	if (dex->tty && dex->open_count == 2)
+	if (dex->tty && dex->open_count == 2) {
+		device_remove_file(disk_to_dev(dex->gd),
+						&dev_attr_model);
+		device_remove_file(disk_to_dev(dex->gd),
+						&dev_attr_firmware_version);
 		dex_spin_down(dex);
+	}
 
 	dex_put(dex);
 
@@ -1042,8 +1047,10 @@ static void dex_block_teardown(struct dex_device *dex)
 
 	PDEBUG("> dex_block_teardown(%p)", dex);
 
+	/* These may have been left behind */
 	device_remove_file(disk_to_dev(dex->gd), &dev_attr_model);
 	device_remove_file(disk_to_dev(dex->gd), &dev_attr_firmware_version);
+
 	del_gendisk(dex->gd);
 
 	/* Tell dex_make_request() to refuse any new bio's */
