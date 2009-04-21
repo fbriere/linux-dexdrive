@@ -197,6 +197,65 @@ static void dex_put_i(int i)
 	mutex_unlock(&dex_devices_mutex);
 }
 
+/*
+ * Record that we are now using this device.  Returns the previous number
+ * of open handles, or <0 in case of error.
+ */
+static int dex_get(struct dex_device *dex)
+{
+	unsigned long flags;
+	int ret = 0;
+
+	PDEBUG("> dex_get(%p)", dex);
+
+	spin_lock_irqsave(&dex->lock, flags);
+
+	if (dex->tty) {
+		ret = dex->open_count++;
+		/* Substract one for the tty */
+		ret--;
+	} else {
+		ret = -ENXIO;
+	}
+
+	spin_unlock_irqrestore(&dex->lock, flags);
+
+	PDEBUG("< dex_get := %d", ret);
+
+	return ret;
+}
+
+/*
+ * Record that we are no longer using this device.  If it is no longer used,
+ * then it will be destroyed.  Returns the current number of open handles, or
+ * <0 if the device was freed.
+ */
+static void dex_block_teardown(struct dex_device *dex);
+static int dex_put(struct dex_device *dex)
+{
+	unsigned long flags;
+	int tmp;
+
+	PDEBUG("> dex_put(%p)", dex);
+
+	spin_lock_irqsave(&dex->lock, flags);
+	tmp = --dex->open_count;
+	spin_unlock_irqrestore(&dex->lock, flags);
+
+	if (tmp == 0) {
+		dex_block_teardown(dex);
+		dex_put_i(dex->i);
+		kfree(dex);
+	}
+
+	/* Substract one for the tty */
+	tmp--;
+
+	PDEBUG("< dex_put := %i", tmp);
+
+	return tmp;
+}
+
 
 /* Low-level functions */
 
@@ -803,65 +862,6 @@ static int dex_thread(void *data)
 	PDEBUG("<< dex_thread exiting");
 
 	return 0;
-}
-
-/*
- * Record that we are now using this device.  Returns the previous number
- * of open handles, or <0 in case of error.
- */
-static int dex_get(struct dex_device *dex)
-{
-	unsigned long flags;
-	int ret = 0;
-
-	PDEBUG("> dex_get(%p)", dex);
-
-	spin_lock_irqsave(&dex->lock, flags);
-
-	if (dex->tty) {
-		ret = dex->open_count++;
-		/* Substract one for the tty */
-		ret--;
-	} else {
-		ret = -ENXIO;
-	}
-
-	spin_unlock_irqrestore(&dex->lock, flags);
-
-	PDEBUG("< dex_get := %d", ret);
-
-	return ret;
-}
-
-/*
- * Record that we are no longer using this device.  If it is no longer used,
- * then it will be destroyed.  Returns the current number of open handles, or
- * <0 if the device was freed.
- */
-static void dex_block_teardown(struct dex_device *dex);
-static int dex_put(struct dex_device *dex)
-{
-	unsigned long flags;
-	int tmp;
-
-	PDEBUG("> dex_put(%p)", dex);
-
-	spin_lock_irqsave(&dex->lock, flags);
-	tmp = --dex->open_count;
-	spin_unlock_irqrestore(&dex->lock, flags);
-
-	if (tmp == 0) {
-		dex_block_teardown(dex);
-		dex_put_i(dex->i);
-		kfree(dex);
-	}
-
-	/* Substract one for the tty */
-	tmp--;
-
-	PDEBUG("< dex_put := %i", tmp);
-
-	return tmp;
 }
 
 /*
