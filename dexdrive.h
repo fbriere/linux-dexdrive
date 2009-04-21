@@ -27,7 +27,7 @@
  * not possible to add such a number, so an existing one must be hijacked from
  * include/linux/tty.h for the time being.
  */
-#define DEX_LDISC	N_X25		/* Default line discipline number */
+#define DEX_LDISC	N_PROFIBUS_FDL	/* Default line discipline number */
 
 
 /*
