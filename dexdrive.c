@@ -138,8 +138,6 @@ struct dex_device {
 	int sector;
 	/* where to fetch/store data */
 	char *data;
-	/* whether we have received and processed a reply */
-	int got_reply;
 	/* command is completed */
 	struct completion command_done;
 	/* return value of command */
@@ -490,7 +488,6 @@ static int dex_attempt_cmd(struct dex_device *dex, unsigned long *flags)
 	dex_tty_write(dex);
 
 	dex->count_in = 0;
-	dex->got_reply = 0;
 
 	/* Default in case of timeout */
 	dex->command_return = -EIO;
@@ -542,11 +539,11 @@ static void dex_check_reply(struct dex_device *dex)
 
 	spin_lock_irqsave(&dex->lock, flags);
 
-	if (! dex->got_reply) {
+	if (dex->command) {
 		ret = dex_read_cmd(dex);
 		PDEBUG(" got %i", ret);
 		if (ret != 0) {
-			dex->got_reply = 1;
+			dex->command = DEX_CMD_NONE;
 			dex->command_return = ret < 0 ? ret : 0;
 			complete(&dex->command_done);
 		}
@@ -583,12 +580,12 @@ static int dex_do_cmd_locked(struct dex_device *dex, int cmd, int n, void *ptr)
 
 	spin_lock_irqsave(&dex->lock, flags);
 
-	dex->command = cmd;
 	dex->sector = n;
 	dex->data = ptr;
 
 	for (i = 0; i <= DEX_MAX_RETRY; i++) {
 		PDEBUG(" Attempt #%i", i);
+		dex->command = cmd;
 		ret = dex_attempt_cmd(dex, &flags);
 		PDEBUG(" Result: %i", ret);
 		if (ret == 0)
