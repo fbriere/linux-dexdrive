@@ -871,7 +871,7 @@ static int dex_block_thread(void *data)
  * that calls to distinct devices will block each other, but does anybody
  * care?
  */
-DECLARE_MUTEX(open_release_mutex);
+static DEFINE_MUTEX(open_release_mutex);
 
 /*
  * Called when our block device is opened.
@@ -883,7 +883,7 @@ static int dex_block_open(COMPAT_OPEN_PARAMS)
 
 	PDEBUG("> dex_block_open(...)");
 
-	if (down_interruptible(&open_release_mutex))
+	if (mutex_lock_interruptible(&open_release_mutex))
 		return -ERESTARTSYS;
 
 	dex = compat_open_get_disk()->private_data;
@@ -916,7 +916,7 @@ out:
 	if (ret < 0)
 		dex_put(dex);
 
-	up(&open_release_mutex);
+	mutex_unlock(&open_release_mutex);
 
 	PDEBUG("< dex_block_open := %d", ret);
 
@@ -932,7 +932,7 @@ static int dex_block_release(COMPAT_RELEASE_PARAMS)
 
 	PDEBUG("> dex_block_release(...)");
 
-	if (down_interruptible(&open_release_mutex))
+	if (mutex_lock_interruptible(&open_release_mutex))
 		return -ERESTARTSYS;
 
 	dex = compat_release_get_disk()->private_data;
@@ -948,7 +948,7 @@ static int dex_block_release(COMPAT_RELEASE_PARAMS)
 
 	dex_put(dex);
 
-	up(&open_release_mutex);
+	mutex_unlock(&open_release_mutex);
 
 	PDEBUG("< dex_block_release := %d", 0);
 	return 0;
