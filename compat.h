@@ -30,6 +30,11 @@
 #endif
 
 
+/* This was defined in 2.6.28 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
+# define disk_to_dev(disk)	(&(disk)->dev)
+#endif
+
 /* struct tty_ldisc was renamed to tty_ldisc_ops in 2.6.27 */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,27)
 # define tty_ldisc_ops tty_ldisc

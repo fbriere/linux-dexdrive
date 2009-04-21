@@ -150,6 +150,8 @@ struct dex_device {
 
 	/* model: PSX or N64 */
 	enum dex_model model;
+	/* Firmware version byte */
+	unsigned char firmware_version;
 
 	/* Disk device we have created */
 	struct gendisk *gd;
@@ -606,6 +608,8 @@ static int dex_spin_up(struct dex_device *dex)
 	/* A regular PSX memory card holds 128 KiB; a N64 card holds 32 KiB */
 	set_capacity(dex->gd, (dex->model == DEX_MODEL_PSX ? 128 : 32) * 2);
 
+	dex->firmware_version = init_data[4];
+
 	ret = dex_do_cmd(dex, DEX_CMD_MAGIC, 0, NULL);
 	if (ret < 0)
 		return ret;
@@ -630,6 +634,51 @@ static void dex_spin_down(struct dex_device *dex)
 {
 	dex_do_cmd(dex, DEX_CMD_OFF, 0, NULL);
 }
+
+
+/* sysfs functions */
+
+/*
+ * Helper function for dex_show_firmware_version().  Returns the n
+ * consecutive bits in word, starting with lowest.
+ */
+static inline unsigned int extract_bits(unsigned int word,
+					unsigned int lowest, unsigned int n)
+{
+	return (word >> lowest) & ((1 << n) - 1);
+}
+
+static ssize_t dex_show_model(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct dex_device *dex = dev_to_disk(dev)->private_data;
+
+	if (dex->tty) {
+		return snprintf(buf, 5, "%s\n",
+				(dex->model == DEX_MODEL_PSX ? "PSX" : "N64"));
+	} else {
+		return -ENODEV;
+	}
+}
+
+static ssize_t dex_show_firmware_version(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct dex_device *dex = dev_to_disk(dev)->private_data;
+
+	if (dex->tty) {
+		/* Version x.yz is encoded as xxyyyyzz */
+		return snprintf(buf, 7, "%d.%d%d\n",
+				extract_bits(dex->firmware_version, 6, 2),
+				extract_bits(dex->firmware_version, 2, 4),
+				extract_bits(dex->firmware_version, 0, 2));
+	} else {
+		return -ENODEV;
+	}
+}
+
+static DEVICE_ATTR(model, S_IRUGO, dex_show_model, NULL);
+static DEVICE_ATTR(firmware_version, S_IRUGO, dex_show_firmware_version, NULL);
 
 
 /* Block device functions */
@@ -845,9 +894,25 @@ static int dex_open(COMPAT_OPEN_PARAMS)
 	if (ret == 0) {
 		/* FIXME: Wait for dex_thread to empty its queue */
 		ret = dex_spin_up(dex);
+		if (ret < 0)
+			goto out;
+
 		check_disk_change(compat_open_get_bdev());
+
+		/* Now we create our sysfs files */
+
+		ret = device_create_file(disk_to_dev(dex->gd),
+						&dev_attr_model);
+		if (ret < 0)
+			goto out;
+
+		ret = device_create_file(disk_to_dev(dex->gd),
+						&dev_attr_firmware_version);
+		if (ret < 0)
+			goto out;
 	}
 
+out:
 	if (ret < 0)
 		dex_put(dex);
 
@@ -977,6 +1042,8 @@ static void dex_block_teardown(struct dex_device *dex)
 
 	PDEBUG("> dex_block_teardown(%p)", dex);
 
+	device_remove_file(disk_to_dev(dex->gd), &dev_attr_model);
+	device_remove_file(disk_to_dev(dex->gd), &dev_attr_firmware_version);
 	del_gendisk(dex->gd);
 
 	/* Tell dex_make_request() to refuse any new bio's */
