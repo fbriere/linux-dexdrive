@@ -129,7 +129,10 @@ struct dex_device {
 	struct tty_struct *tty;
 	/* number of open handles that point to this device */
 	int open_count;
-	/* current command, or nothing if we are free */
+
+	/* mutex to be held while a command is active */
+	struct mutex command_mutex;
+	/* current command */
 	enum dex_command command;
 	/* sector number to read/write */
 	int sector;
@@ -567,21 +570,18 @@ static void dex_check_reply(struct dex_device *dex)
  *   - For DEX_CMD_INIT, the 5-byte ID reply will be stored in *ptr.
  *
  * Otherwise, these arguments are not used.
+ *
+ * dex_do_cmd() will acquire command_mutex; dex_do_cmd_locked() will not.
  */
-static int dex_do_cmd(struct dex_device *dex, int cmd, int n, void *ptr)
+
+static int dex_do_cmd_locked(struct dex_device *dex, int cmd, int n, void *ptr)
 {
 	unsigned long flags;
 	int ret, i;
 
-	PDEBUG("> dex_do_cmd(%p, %d", dex, cmd);
+	PDEBUG("> dex_do_cmd_locked(%p, %d", dex, cmd);
 
 	spin_lock_irqsave(&dex->lock, flags);
-
-	if (dex->command != DEX_CMD_NONE) {
-		warn("Already busy doing %i", dex->command);
-		ret = -EBUSY;
-		goto out;
-	}
 
 	dex->command = cmd;
 	dex->sector = n;
@@ -595,10 +595,27 @@ static int dex_do_cmd(struct dex_device *dex, int cmd, int n, void *ptr)
 			break;
 	}
 
-out:
 	dex->command = DEX_CMD_NONE;
 
 	spin_unlock_irqrestore(&dex->lock, flags);
+
+	PDEBUG("< dex_do_cmd_locked := %i", ret);
+
+	return ret;
+}
+
+static int dex_do_cmd(struct dex_device *dex, int cmd, int n, void *ptr)
+{
+	int ret;
+
+	PDEBUG("> dex_do_cmd(%p, %d", dex, cmd);
+
+	if (mutex_lock_interruptible(&dex->command_mutex))
+		return -ERESTARTSYS;
+
+	ret = dex_do_cmd_locked(dex, cmd, n, ptr);
+
+	mutex_unlock(&dex->command_mutex);
 
 	PDEBUG("< dex_do_cmd := %i", ret);
 
@@ -619,15 +636,22 @@ static int dex_transfer(struct dex_device *dex,
 					buffer, write);
 
 	for (; len > 0; sector++, len--) {
+		/* Make sure to keep SEEK/WRITE together */
+		if (mutex_lock_interruptible(&dex->command_mutex))
+			return -ERESTARTSYS;
+
 		if (write && (dex->model == DEX_MODEL_N64)) {
-			error = dex_do_cmd(dex, DEX_CMD_SEEK, sector, NULL);
+			error = dex_do_cmd_locked(dex,
+						DEX_CMD_SEEK, sector, NULL);
 			if (error < 0)
 				break;
 		}
 
-		error = dex_do_cmd(dex,
+		error = dex_do_cmd_locked(dex,
 					(write ? DEX_CMD_WRITE : DEX_CMD_READ),
 					sector, buffer);
+
+		mutex_unlock(&dex->command_mutex);
 
 		if (error < 0)
 			break;
@@ -640,18 +664,15 @@ static int dex_transfer(struct dex_device *dex,
 	return error;
 }
 
-/*
- * Initialize the device.  This should not be called in parallel with
- * any other communication.  Returns -ENXIO if no card is inserted.
- */
-static int dex_spin_up(struct dex_device *dex)
+/* Used by dex_spin_up(), to avoid a bunch of gotos.  Not for external use. */
+static int dex_spin_up_locked(struct dex_device *dex)
 {
 	char init_data[5];
 	int ret;
 
 	PDEBUG("> dex_spin_up(%p)", dex);
 
-	ret = dex_do_cmd(dex, DEX_CMD_INIT, 0, init_data);
+	ret = dex_do_cmd_locked(dex, DEX_CMD_INIT, 0, init_data);
 	if (ret < 0)
 		return ret;
 
@@ -669,11 +690,11 @@ static int dex_spin_up(struct dex_device *dex)
 
 	dex->firmware_version = init_data[4];
 
-	ret = dex_do_cmd(dex, DEX_CMD_MAGIC, 0, NULL);
+	ret = dex_do_cmd_locked(dex, DEX_CMD_MAGIC, 0, NULL);
 	if (ret < 0)
 		return ret;
 
-	ret = dex_do_cmd(dex, DEX_CMD_STATUS, 0, NULL);
+	ret = dex_do_cmd_locked(dex, DEX_CMD_STATUS, 0, NULL);
 	if (ret < 0)
 		return ret;
 
@@ -681,7 +702,24 @@ static int dex_spin_up(struct dex_device *dex)
 
 	/* Don't bother turning on the light if no card is present */
 	if (ret == 0)
-		dex_do_cmd(dex, DEX_CMD_ON, 0, NULL);
+		dex_do_cmd_locked(dex, DEX_CMD_ON, 0, NULL);
+
+	return ret;
+}
+
+/*
+ * Initialize the device.  Returns -ENXIO if no card is inserted.
+ */
+static int dex_spin_up(struct dex_device *dex)
+{
+	int ret;
+
+	if (mutex_lock_interruptible(&dex->command_mutex))
+		return -ERESTARTSYS;
+
+	ret = dex_spin_up_locked(dex);
+
+	mutex_unlock(&dex->command_mutex);
 
 	return ret;
 }
@@ -1196,6 +1234,7 @@ static int dex_tty_open(struct tty_struct *tty)
 	}
 
 	spin_lock_init(&dex->lock);
+	mutex_init(&dex->command_mutex);
 	dex->i = i;
 
 	dex->tty = tty;
