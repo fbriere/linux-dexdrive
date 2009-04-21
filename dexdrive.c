@@ -175,8 +175,7 @@ static int dex_get_i(void)
 {
 	int i;
 
-	if (mutex_lock_interruptible(&dex_devices_mutex) < 0)
-		return -ERESTARTSYS;
+	mutex_lock(&dex_devices_mutex);
 
 	i = find_first_zero_bit(dex_devices, DEX_MAX_DEVICES);
 
