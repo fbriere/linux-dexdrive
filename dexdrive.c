@@ -485,7 +485,6 @@ static int dex_attempt_cmd(struct dex_device *dex, unsigned long *flags)
 		return -EIO;
 
 	dex->ptr_out = dex->buf;
-	dex_tty_write(dex);
 
 	dex->count_in = 0;
 
@@ -507,6 +506,8 @@ static int dex_attempt_cmd(struct dex_device *dex, unsigned long *flags)
 
 	init_completion(&dex->command_done);
 	spin_unlock_irqrestore(&dex->lock, *flags);
+
+	dex_tty_write(dex);
 
 	/* TODO: Skip this for N64 and DEX_CMD_ON/OFF */
 
@@ -810,24 +811,33 @@ static inline void dex_block_do_bio(struct dex_device *dex, struct bio *bio)
 }
 
 /*
- * Add a bio to the queue -- must be called while holding the spinlock.
+ * Add a bio to the queue
  */
 static void dex_block_add_bio(struct dex_device *dex, struct bio *bio)
 {
+	unsigned long flags;
+
+	spin_lock_irqsave(&dex->lock, flags);
+
 	if (dex->bio_tail)
 		dex->bio_tail->bi_next = bio;
         else
 		dex->bio_head = bio;
 
 	dex->bio_tail = bio;
+
+	spin_unlock_irqrestore(&dex->lock, flags);
 }
 
 /*
- * Remove a bio from the queue -- must be called while holding the spinlock.
+ * Remove a bio from the queue
  */
 static struct bio *dex_block_get_bio(struct dex_device *dex)
 {
 	struct bio *bio;
+	unsigned long flags;
+
+	spin_lock_irqsave(&dex->lock, flags);
 
 	if ((bio = dex->bio_head)) {
 		if (bio == dex->bio_tail)
@@ -835,6 +845,8 @@ static struct bio *dex_block_get_bio(struct dex_device *dex)
 		dex->bio_head = bio->bi_next;
 		bio->bi_next = NULL;
 	}
+
+	spin_unlock_irqrestore(&dex->lock, flags);
 
 	return bio;
 }
@@ -846,7 +858,6 @@ static struct bio *dex_block_get_bio(struct dex_device *dex)
 static int dex_block_make_request(struct request_queue *queue, struct bio *bio)
 {
 	struct dex_device *dex = queue->queuedata;
-	unsigned long flags;
 
 	PDEBUG("> dex_block_make_request(%p, %p)", queue, bio);
 
@@ -856,10 +867,8 @@ static int dex_block_make_request(struct request_queue *queue, struct bio *bio)
 		return 0;
 	}
 
-	spin_lock_irqsave(&dex->lock, flags);
 	dex_block_add_bio(dex, bio);
 	wake_up(&dex->thread_wait);
-	spin_unlock_irqrestore(&dex->lock, flags);
 
 	PDEBUG("< dex_block_make_request");
 
@@ -874,7 +883,6 @@ static int dex_block_thread(void *data)
 {
 	struct dex_device *dex = data;
 	struct bio *bio;
-	unsigned long flags;
 
 	PDEBUG(">> dex_block_thread starting");
 
@@ -887,9 +895,7 @@ static int dex_block_thread(void *data)
 		if (! dex->bio_head)
 			continue;
 
-		spin_lock_irqsave(&dex->lock, flags);
 		bio = dex_block_get_bio(dex);
-		spin_unlock_irqrestore(&dex->lock, flags);
 
 		dex_block_do_bio(dex, bio);
 	}
@@ -1112,7 +1118,10 @@ static void dex_block_teardown(struct dex_device *dex)
  */
 static void dex_tty_write(struct dex_device *dex)
 {
+	unsigned long flags;
 	int i;
+
+	spin_lock_irqsave(&dex->lock, flags);
 
 	/* dex->tty should always be defined here, but better safe than sorry */
 	if (dex->tty && dex->count_out > 0) {
@@ -1130,6 +1139,8 @@ static void dex_tty_write(struct dex_device *dex)
 		else
 			clear_bit(TTY_DO_WRITE_WAKEUP, &dex->tty->flags);
 	}
+
+	spin_unlock_irqrestore(&dex->lock, flags);
 }
 
 /* Called by the tty driver when data is coming in */
@@ -1167,13 +1178,10 @@ out:
 static void dex_tty_write_wakeup(struct tty_struct *tty)
 {
 	struct dex_device *dex = tty->disc_data;
-	unsigned long flags;
 
 	PDEBUG("> dex_tty_write_wakeup(%p)", tty);
 
-	spin_lock_irqsave(&dex->lock, flags);
 	dex_tty_write(dex);
-	spin_unlock_irqrestore(&dex->lock, flags);
 
 	PDEBUG("< dex_tty_write_wakeup");
 }
