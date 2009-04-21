@@ -1009,7 +1009,8 @@ static void dex_tty_write(struct dex_device *dex)
 	if (dex->tty && dex->count_out > 0) {
 		PDEBUG("writing %d bytes to device", dex->count_out);
 
-		i = dex->tty->ops->write(dex->tty, dex->ptr_out, dex->count_out);
+		i = (compat_tty_write(dex->tty))(dex->tty, dex->ptr_out,
+							dex->count_out);
 		dex->ptr_out += i;
 		dex->count_out -= i;
 

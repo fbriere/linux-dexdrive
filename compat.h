@@ -1,6 +1,6 @@
 /*
  * Declarations to provide compatibility with all kernel versions from
- * 2.6.26 up, without littering the code with #ifdefs all over.
+ * 2.6.25 up, without littering the code with #ifdefs all over.
  */
 
 #include <linux/version.h>
@@ -33,5 +33,12 @@
 /* struct tty_ldisc was renamed to tty_ldisc_ops in 2.6.27 */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,27)
 # define tty_ldisc_ops tty_ldisc
+#endif
+
+/* tty_operations were moved to tty->ops in 2.6.26 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,26)
+# define compat_tty_write(tty)		tty->driver->write
+#else
+# define compat_tty_write(tty)		tty->ops->write
 #endif
 
