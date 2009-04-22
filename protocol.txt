@@ -1,281 +1,344 @@
-N64 notes:
-
-07 doesn't generate a reply (though it works)
-
-Light turns on automatically when transmitting (stays on after)
-
-01 returns 25 the first time a card is inserted
-
-blocks are 256-byte long
-
-DexPlorer tries to set port to 19200 first
-
-DexPlorer sends 03 00 00, Drive responds with 27
+DEXDRIVE COMMUNICATION PROTOCOL
+===============================
 
 
-====
+  Everything in this document was tested with my own DexDrives, which are of
+  firmware versions 1.12 (PSX) and 1.00 (N64).  It is possible that other
+  versions may behave differently.  If you have a model of different firmware
+  version, I'd like to hear from you.
 
 
-Serial port is set to 38400 -- limited success with 600.
+GENERALITIES
+------------
 
-DexPlorer version 1.00.940
+The serial connection with the DexDrive is established at 38400 baud, 8 bits,
+no parity, one stop bit (8N1).  InterAct's DexPlorer software enables hardware
+flow control (RTS/CTS) when opening the port, but it is somewhat unclear
+whether or not the DexDrive actually abides by it.  (Given how at most 261
+bytes will be sent each way, flow control is unlikely to be needed anyway.)
 
-DexDrive version 1.12  (how?)
+Communication with the DexDrive is half-duplex, with every exchange initiated
+on the computer side.  In other words, the DexDrive waits for a command,
+executes it, sends a reply, and waits again.  At most one command is active at
+any time.
 
-On box: CV-1128
-On DexDrive, manual and floppies: SV-1128
-
-(N64 is SV-388)
-
-Unit does not work well if plugging in serial port w/o power; it needs to
-be completely unplugged if this happens.  Once plugged in, power can be
-removed.
-
-Sometimes there's a weird feedback going on; unplugging the serial port
-is often enough.
-
-No, there's no USB version.
-
-Haven't tried N64 version yet.
-
-Availability: Still available, below $10 at EBworld.
-
-Corporate Info: http://www.interact-acc.com
-                (http://www.dexchange.net is no more)
-
-Links:  http://dexux.sourceforge.net
-
-What CPU?  Blob... :(
+Every command or reply is prefixed with the string "IAI" (0x49 0x41 0x49)
+(possibly standing for "InterAct Accessories, Inc.").  A single byte follows,
+indicating which command or reply is being sent.  More bytes may follow,
+depending on the exact command/reply; the nature of these arguments is listed
+for each command and reply below.
 
 
 COMMANDS
-========
+--------
 
-(C) indicates a command, and (R) a response.
+  For all commands specifying a (16-bit) frame number, <lsb> and <msb> are,
+  respectively, its least and most significant bytes.  Make sure to pay close
+  attention to the order, as it varies between commands.
 
+  Note that the Nintendo 64 DexDrive will get stuck if it is sent an
+  incomplete command.  At that point, the only solution is to unplug it
+  completely, and plug it back (power first, then serial).
 
-0x00 (C) INIT
+0x00  INIT
 
-  Args: 17 bytes, contents unknown
+  Args: <17 bytes>
   Reply: ID
 
-0x01 (C) STATUS
+  Initializes the DexDrive; see the POUTING section below.
 
-  Args: None
-  Reply: OK, OK_CARD
+  The contents of the 17 bytes does not appear to have any significance,
+  except for determining the contents of the "weird" byte in the ID reply.
+  See the WEIRD FORMULA section below for more details.
 
-0x02 (C) READ
+  InterAct's DexPlorer software uses the following hard-coded string:
 
-  Args: Block number (little-endian)
-  Reply: OK, DATA
+     10 29 23 be 84 e1 6c d6 ae 52 90 49 f1 f1 bb e9 eb
 
-  OK is returned if there is no card.
+0x01  STATUS
 
-  Block number is ANDed with 0x03FF.
+  Args: none
+  Reply: NOCARD or CARD [PSX]  /  NOCARD, CARD or CARD_NEW [N64]
 
-0x04 (C) WRITE
+  Queries the DexDrive as to whether or not a card is inserted.
 
-  Args: Block number (big-endian), reverse block number (little-endian),
-        128 bytes of data, checksum
-  Reply: WRITE_OK, WRITE_SAME
+  The N64 model will reply CARD_NEW if this is the first access to a
+  newly-inserted card (ie. following a NOCARD reply).
 
-  The reversed block number is just that; exchange bits 0 and 15, 1 and 14,
-  and so on.  You can see it as reversing all 16 bits, then sending the
-  result in little-endian order; or as reversing each byte individually (ie.
-  byte1, byte2, byte1-rev, byte2-rev) if it suits you better.
+0x02  READ
 
-  The checksum is merely an XOR of all the other 132 bytes.
+  Args: <lsb> <msb>
+  Reply: NOCARD or DATA
+
+  Fetches the contents of a full frame.
+
+  The PSX model will produce an empty DATA reply for frame numbers above
+  0x3ff; the N64 model ANDs the frame number with 0x7f instead, guaranteeing a
+  valid number.
+
+0x03  SEEK  [N64 only]
+
+  Args: <lsb> <msb>
+  Reply: NOCARD or SEEK_OK
+
+  States the frame number of the next WRITE command.
+
+  This command doesn't actually do anything other than update a register
+  within the DexDrive, to be used by WRITE later on.
+
+0x04  WRITE
+
+  Args: [PSX]  <msb> <lsb> <rev(msb)> <rev(lsb)> <128-byte data> <checksum>
+        [N64]  <256-byte data> <checksum>
+  Reply: NOCARD, WRITE_OK or WRITE_SAME
+
+  Writes the contents of a full frame.
+
+  For the PSX model, the rev() function reverses the bit order of a byte,
+  swapping bits 0 and 7, 1 and 6, and so on.  (The result is thus equivalent
+  to sending rev(frame number) in little-endian order.)
+
+  For the N64 model, the frame number written to is the one specified by the
+  last (successful or not) READ or SEEK command, or 0 if no such command has
+  been issued since the DexDrive was powered on.
+
+  The checksum is merely an XOR of all the other argument bytes, including the
+  frame number bytes for the PSX model.
   
-  If the block numbers don't match, or if the checksum is invalid (perhaps
-  there was interference), ERROR will be returned.
+  The PSX model will reply ERROR if the block numbers don't match, or if the
+  checksum is invalid.  The N64 model appears to ignore the checksum.
 
-0x05 (C) PAGE
+0x05  PAGE  [PSX only]
 
   Args: <flags> <n>
-  Reply: OK, WAIT + OK_CARD
+  Reply: NOCARD or (WAIT* and CARD)
 
-  <flags>:
+  Changes pages on a multi-page memory card.
+
+  <flags> is the ORed value of any of the following flags:
     0x01  "Massive" card
     0x40  Previous page
-    0x80  Fast forward
-    0xc0  Fast backward
+    0x80  Fast forward/backward
 
-  <n> is ignored on Fast forward/backward.
+  <n> is the number of pages to jump forward/backward, and is ignored on Fast
+  forward/backward.
 
-  Typically, only one of Next/Previous/Ffwd/Fbwd is used, along w/ the
-  massive flag; however, I have yet to see a combination that is rejected
-  by the DexDrive.  (And since I don't have a multi-page card, I can't
-  report on what happens.)
+  This basically emulates the various controller button combinations used by
+  some multi-page memory cards.  (Unfortunately, I cannot comment on which
+  ones those are, since I don't own any such cards.)
 
-  This command never fails; it returns OK if there is no card, and OK_CARD
-  even if the card was removed during the operation.
+  If a card is inserted, the DexDrive will return a series of WAIT replies
+  while it issues the command, followed by a final CARD reply.  (The CARD
+  reply will be issued even if the card was removed during the operation.)
 
-0x07 (C) LIGHT
+0x07  LIGHT
 
-  Args: 0 to turn off, 1 to turn on, other values ignored
-  Reply: (Last reply)
+  Args: 0 to turn off, 1 to turn on
+  Reply: last reply [PSX]  /  none [N64]
 
-  The reply will actually be a duplicate of the previous reply, without any
-  arguments.
+  Turns the light on/off.
 
-0x20 (R) POUT
+  Note that the light is automatically turned on for the N64 model when
+  sending a READ or WRITE command.  (It is not turned off afterwards, though.)
 
-  Args: none
+  This command can never fail, and doesn't have anything interesting to
+  report, so the DexDrive developers don't appear to have paid any attention
+  to what reply should be sent back.
 
-  This will be issued in reply to *all* commands, until initialized.
-  See "pouting" section, below.
+  The PSX model will re-issue the last reply is has previously issued for any
+  command, but without any arguments.  The N64 model will simply not reply.
 
-0x21 (R) ERROR
+  Providing any other value than 0 or 1 will trigger an ERROR on the PSX
+  model, and turn the light off on the N64 model.
 
-  Args: none
-
-  This indicates either an unknown command, a wrong number of arguments, or
-  a wrong checksum.  It is *not* used to indicate failure.
-
-0x22 (R) OK
+0x27  MAGIC_HANDSHAKE
 
   Args: none
-
-  Indicates that the command was accepted.  This does not mean success --
-  trying to read when there is no card will return OK, because the command
-  is valid.
-
-  If a card is inserted, OK_CARD is returned instead.
-
-0x23 (R) OK_CARD
-
-  Args: (see description)
-
-  Is issued in place of OK when a card is inserted.
-
-  In response to PAGE, there are no arguments.
-
-  In response to STATUS, there is one argument: 0x10 when the card is
-  inserted, and 0x00 after the first sucessful write.
-  [Even if WRITE_SAME?]
-
-0x27 (C) MAGIC_HANDSHAKE
-
-  Args: none
-  Reply: ERROR
+  Reply: ERROR [PSX]  /  none [N64]
 
   This command is used, after INIT, to bring the DexDrive back from its
-  "pouting" stage.  See the "pouting" section below.
+  "pouting" stage.  See the POUTING section below.
 
-  For some reason, the DexDrive replies to this as an illegal command.
+  For some reason, the PSX DexDrive replies to this as an illegal command,
+  while the N64 does not reply.
 
-0x28 (R) WRITE_OK
+
+REPLIES
+-------
+
+0x20  POUT
 
   Args: none
 
-  Block has been written.
+  This will be issued in reply to *all* (valid [PSX]) commands, except INIT,
+  until initialized.  See the POUTING section below.
 
-0x29 (R) WRITE_SAME
+0x21  ERROR
+
+  Args: none
+
+  This indicates either an unknown command, a wrong number of arguments [PSX],
+  or a wrong checksum [PSX].  It is *not* used to indicate failure of a valid
+  command.
+
+  The N64 model will only issue this for unknown commands; it appears to
+  ignore checksums, and will hang when not provided with enough arguments.
+
+0x22  NOCARD
+
+  Args: none
+
+  Indicates that no card is currently inserted.
+
+  This is typically a failure response to any command that requires the
+  presence of a card, although it can also be issued in response to STATUS, in
+  which case it does not indicate failure, but merely states that no card is
+  currently inserted.
+
+  (Note that when issued in reply to a SEEK, the DexDrive register will have
+  been updated regardless.)
+
+0x23  CARD
+
+  Args: none or <status> [PSX]  /  none [N64]
+
+  Indicates that a card is currently inserted.
+
+  For the PSX model, in response to STATUS, there is one argument: 0x10 if the
+  card has not been written to since it was inserted, and 0x00 after the first
+  sucessful write (including WRITE_SAME).  This is reset to 0x10 if a card is
+  taken out and reinserted, even if no commands are issued in-between.
+
+  Otherwise, in response to STATUS for the N64 model, or in response to PAGE,
+  there are no arguments.
+
+0x25  CARD_NEW  [N64 only]
+
+  Args: none
+
+  Indicates that a card is currently inserted.
+
+  The N64 will provide this reply instead of CARD the first time a STATUS is
+  issued either after power on, or after a STATUS-NOCARD exchange.  (There
+  does appear to be exceptions, though.)
+
+0x27  SEEK_OK  [N64 only]
+
+  Args: none
+
+  Indicates that a card is present following a SEEK.
+
+  (This is not really a success reply, since a SEEK will update the DexDrive
+  register regardless of whether or not a card is present.)
+
+0x28  WRITE_OK
+
+  Args: none
+
+  Indicates that a frame has been successfully written.
+
+0x29  WRITE_SAME
 
   Args: none
 
   Same as WRITE_OK, but indicates that the write did not induce any change to
-  the block (ie. the data was the same).
+  the block (ie. the new data was the same as the old one).
 
-0x2a (R) WAIT
+  (Maybe this was done in order to reduce wear?)
+
+  (The semantics appear to be different for the N64 model, but I can't figure
+  out how.)
+
+0x2a  WAIT  [PSX only]
 
   Args: none
 
   When performing time-consuming page switches, the DexDrive will issue WAIT
-  replies at regular intervals, until a OK or OK_CARD is issued.
+  replies at regular intervals, until a CARD or NOCARD reply is issued.
 
-0x40 (R) ID
+0x40  ID
 
-  Args: <magic number> <4-byte id string>
+  Args: <weird byte> <3-byte model> <firmware version>
 
-  The magic number is derived from the 17-byte string sent with INIT, in a
-  cryptic fashion described below.
+  Identifies the DexDrive model in response to INIT.
 
-  The 4-byte ID string is "PSXF" or "N64@" in my case.
+  <weird byte> is derived from the 17-byte string sent with INIT; see WEIRD
+  FORMULA below for details.
 
-0x41 (R) DATA
+  The 3-byte model string is either "PSX" or "N64".
 
-  Args: 128 bytes of data, <checksum>
+  <firmware version> is the x.yz firmware version packed into a single byte
+  thusly: xxyyyyzz.
 
-  Checksum is XOR of all 128 bytes, and the two bytes of the sector number.
+0x41  DATA
+
+  Args: <data> <checksum>
+
+  Returns the data from a single frame.
+
+  <data> will be 128 bytes long for the PSX model, and 256 bytes long for the
+  N64 model.
+
+  Checksum is the XOR of all data bytes, and the two bytes of the sector
+  number as they were sent with the READ command.  (In other words, before
+  they were ORed with 0x7f for the N64 model.)
 
   If the card was removed during the read, only a partial response will be
   sent back.
 
 
-MAGIC FORMULA
-=============
-
-The "magic number" in ID is derived from the 17-byte string sent in AUTH.
-To do this, apply the following operations to each corresponding byte:
-
-	01: 0        09: AND 0x33
-	02: SWAP     10: AND 0x7E | (REV & 0x81)
-	03: ROR 1    11: 0
-	04: ROR 4    12: NOP
-	05: REV      13: XOR 0x34
-	06: NOP      14: AND 0x55
-	07: 0        15: 0
-	08: ROL 2    16: REV, then ROL 1
-	             17: AND 0x33
-
-Here are some definitions:
-
- 0     Replace with 0x00
- NOP   Do nothing -- use byte as-is
- AND   Yes, *that* and operator. :)
- XOR   Yes, *that* xor operator. :)
- ROL   Rotate left by n bits
- ROR   Rotate right by n bits
- REV   Swap bits 0 and 7, 1 and 6, 2 and 5, 3 and 4
- SWAP  Swap bits 0 and 1, 2 and 3, 4 and 5, 6 and 7
-
-(Byte 10 seems quite complex, but the overall effect is simply to swap bits 0
-and 7.)
-
-Once you're done, add all 17 bytes together, plus 0xa9; the lower 8 bits of
-the result (AND 0xff) hold the magic number.
-
-
-INITIALIZATION
-==============
-
-What DexPlorer does:
-
- - send a string of 32 'X' (basically garbage) to each port, trying to find
-   the DexDrive, which will in turn return ERROR.  (A second attempt will be
-   made if nothing comes back after a certain delay.)
- 
- - send INIT, with the following string:
-
-     10 29 23 be 84 e1 6c d6 ae 52 90 49 f1 f1 bb e9 eb
-     10 B3 A6 DB 3C 87 0C 3E 99 24 5E 0D 1C 06 B7 47 DE (2nd try N64)
-
-
- - send a bunch of 10 MAGIC_HANDSHAKE
-
- - send ID
-
- - send LIGHT 1 (to turn on the light)
-
-
 POUTING
-=======
+-------
 
-When a DexDrive is first plugged in, it will be in what I call the "pouting"
+When a DexDrive is first powered on, it will be in what I call the "pouting"
 stage, and will basically refuse to do anything until it is initialized.
-Any command beside INIT will get a POUT reply, and nothing will happen.
-(Invalid commands will still get ERROR replies, though.)
+Any valid command beside INIT will get a POUT reply, and nothing will happen.
+
+(The PSX model will still reject invalid commands with ERROR, while the N64
+model will POUT at everything but INIT, as long as it bears the "IAI" prefix.)
 
 To initialize the DexDrive, one must send an INIT command, followed up by
-a MAGIC_HANDSHAKE within (approx.) 100ms after the OK reply.
+a MAGIC_HANDSHAKE within (approx.) 100ms after the ID reply.
 
-The DexDrive will go back to pouting if both the serial and power are
-disconnected.  [do more tests here]
+
+WEIRD FORMULA
+-------------
+
+The "weird number" in ID is derived from the 17-byte string sent in AUTH.
+To do this, apply the following operations to each corresponding byte (note
+that some bytes are not used):
+
+	00: -        06: -                         0c: XOR 0x34
+	01: SWAP     07: ROL 2                     0d: AND 0x55
+	02: ROR 1    08: AND 0x33                  0e: -
+	03: ROR 4    09: AND 0x7E | (REV & 0x81)   0f: REV, then ROL 1
+	04: REV      0a: -                         10: AND 0x33
+	05: NOP      0b: NOP
+
+   NOP   Do nothing -- use byte as-is
+   ROL   Rotate left by n bits
+   ROR   Rotate right by n bits
+   REV   Swap bits 0 and 7, 1 and 6, 2 and 5, 3 and 4
+   SWAP  Swap bits 0 and 1, 2 and 3, 4 and 5, 6 and 7
+
+(Byte 0x09 seems quite complex, but the overall effect is simply to swap bits
+0 and 7.)
+
+Once you're done, add all the bytes together with 0xa9; the lower 8 bits of
+the result (AND 0xff) hold the weird number.
+
+(I have no idea why this is so complex, especially given how it doesn't
+achieve anything.  InterAct's DexPlorer will nevertheless refuse to talk to
+any device that does not produce the expected byte, but since it always sends
+the same 17-byte string, what's the point?  For fun, though, contrast the
+complexity of this formula with the cheap XOR checksum used elsewhere.)
 
 
 TIMING
-======
+------
+
+(This was written a long time ago, and may not be accurate.  I'm keeping this
+section for archival purposes for the time being.)
 
 Delay for command completion: 10ms
 
