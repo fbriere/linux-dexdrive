@@ -15,15 +15,15 @@ KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 PWD       := $(shell pwd)
 
 
-all: attach modules
+all: dexattach modules
 
-attach: dexdrive.h
+dexattach: dexdrive.h
 
 modules:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
 
 clean:
-	rm -rf attach
+	rm -rf dexattach
 	-$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
 	# These are left behind by the Linux Makefile
 	rm -f Module.markers modules.order
