@@ -11,6 +11,8 @@ else
 
 CFLAGS = -O2 -g -Wall
 
+PREFIX = /usr/local
+
 KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 PWD       := $(shell pwd)
 
@@ -21,6 +23,10 @@ dexattach: dexdrive.h
 
 modules:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
+
+install: all
+	cp dexattach $(DESTDIR)/$(PREFIX)/bin
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) INSTALL_MOD_PATH=$(abspath $(DESTDIR)) modules_install
 
 clean:
 	rm -rf dexattach
