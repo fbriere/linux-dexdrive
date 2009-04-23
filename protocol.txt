@@ -105,7 +105,7 @@ COMMANDS
   The checksum is merely an XOR of all the other argument bytes, including the
   frame number bytes for the PSX model.
   
-  The PSX model will reply ERROR if the block numbers don't match, or if the
+  The PSX model will reply ERROR if the frame numbers don't match, or if the
   checksum is invalid.  The N64 model appears to ignore the checksum.
 
 0x05  PAGE  [PSX only]
@@ -242,7 +242,7 @@ REPLIES
   Args: none
 
   Same as WRITE_OK, but indicates that the write did not induce any change to
-  the block (ie. the new data was the same as the old one).
+  the frame (ie. the new data was the same as the old one).
 
   (Maybe this was done in order to reduce wear?)
 
@@ -279,7 +279,7 @@ REPLIES
   <data> will be 128 bytes long for the PSX model, and 256 bytes long for the
   N64 model.
 
-  Checksum is the XOR of all data bytes, and the two bytes of the sector
+  Checksum is the XOR of all data bytes, and the two bytes of the frame
   number as they were sent with the READ command.  (In other words, before
   they were ORed with 0x7f for the N64 model.)
 

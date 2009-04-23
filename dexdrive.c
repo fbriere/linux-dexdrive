@@ -134,8 +134,8 @@ struct dex_device {
 	struct mutex command_mutex;
 	/* current command */
 	enum dex_command command;
-	/* sector number to read/write */
-	int sector;
+	/* frame number to read/write */
+	int frame;
 	/* where to fetch/store data */
 	char *data;
 	/* command is completed */
@@ -260,7 +260,7 @@ static int dex_put(struct dex_device *dex)
 /* Low-level functions */
 
 /*
- * Split a 16-bit sector number into two bytes, for use as argument to
+ * Split a 16-bit frame number into two bytes, for use as argument to
  * SEEK/READ/WRITE, and for computing the checksum on READ.
  */
 
@@ -275,17 +275,17 @@ static inline unsigned char msb(int x)
 }
 
 /*
- * PSX sectors have 256 bytes; N64 sectors, 512
+ * PSX frames have 256 bytes; N64 frames, 512
  */
 
-static inline int dex_sector_shift(const struct dex_device *dex)
+static inline int dex_frame_shift(const struct dex_device *dex)
 {
 	return (dex->model == DEX_MODEL_PSX ? 7 : 8);
 }
 
-static inline int dex_sector_size(const struct dex_device *dex)
+static inline int dex_frame_size(const struct dex_device *dex)
 {
-	return (1 << dex_sector_shift(dex));
+	return (1 << dex_frame_shift(dex));
 }
 
 /*
@@ -338,26 +338,26 @@ static int dex_prepare_cmd(struct dex_device *dex)
 	switch (dex->command) {
 	case DEX_CMD_READ:
 		add2bufc(dex, DEX_OPCODE_READ);
-		add2bufc(dex, lsb(dex->sector));
-		add2bufc(dex, msb(dex->sector));
+		add2bufc(dex, lsb(dex->frame));
+		add2bufc(dex, msb(dex->frame));
 		break;
 	case DEX_CMD_SEEK:
 		if (dex->model == DEX_MODEL_PSX)
 			return -1;
 
 		add2bufc(dex, DEX_OPCODE_SEEK);
-		add2bufc(dex, lsb(dex->sector));
-		add2bufc(dex, msb(dex->sector));
+		add2bufc(dex, lsb(dex->frame));
+		add2bufc(dex, msb(dex->frame));
 		break;
 	case DEX_CMD_WRITE:
 		add2bufc(dex, DEX_OPCODE_WRITE);
 		if (dex->model == DEX_MODEL_PSX) {
-			add2bufc(dex, msb(dex->sector));
-			add2bufc(dex, lsb(dex->sector));
-			add2bufc(dex, reverse_byte(msb(dex->sector)));
-			add2bufc(dex, reverse_byte(lsb(dex->sector)));
+			add2bufc(dex, msb(dex->frame));
+			add2bufc(dex, lsb(dex->frame));
+			add2bufc(dex, reverse_byte(msb(dex->frame)));
+			add2bufc(dex, reverse_byte(lsb(dex->frame)));
 		}
-		add2bufs(dex, dex->data, dex_sector_size(dex));
+		add2bufs(dex, dex->data, dex_frame_size(dex));
 		add2bufc(dex, dex_checksum((dex->buf + 4), (dex->count_out - 4)));
 		break;
 	case DEX_CMD_INIT:
@@ -427,13 +427,13 @@ static int dex_read_cmd(struct dex_device *dex)
 
 	switch (mkpair(dex->command, reply)) {
 	case mkpair(DEX_CMD_READ, DEX_OPCODE_DATA):
-		if (n_args < (dex_sector_size(dex) + 1))
+		if (n_args < (dex_frame_size(dex) + 1))
 			return 0;
-		if ((dex_checksum((dex->buf + 4), (dex_sector_size(dex) + 1))
-			^ lsb(dex->sector) ^ msb(dex->sector)) != 0) {
+		if ((dex_checksum((dex->buf + 4), (dex_frame_size(dex) + 1))
+			^ lsb(dex->frame) ^ msb(dex->frame)) != 0) {
 			return -EIO;
 		}
-		memcpy(dex->data, (dex->buf + 4), dex_sector_size(dex));
+		memcpy(dex->data, (dex->buf + 4), dex_frame_size(dex));
 		return 1;
 	case mkpair(DEX_CMD_SEEK, DEX_OPCODE_SEEK_OK):
 	case mkpair(DEX_CMD_WRITE, DEX_OPCODE_WOK):
@@ -561,8 +561,8 @@ static void dex_check_reply(struct dex_device *dex)
  * The meaning of n and *ptr are specific to each command:
  *
  *   - For DEX_CMD_SEEK (N64) and DEX_CMD_READ/WRITE (PSX), n contains the
- *     sector number.
- *   - For DEX_CMD_READ/WRITE (both models), the sector data will be read
+ *     frame number.
+ *   - For DEX_CMD_READ/WRITE (both models), the frame data will be read
  *     from or written to *ptr.
  *   - For DEX_CMD_INIT, the 5-byte ID reply will be stored in *ptr.
  *
@@ -580,7 +580,7 @@ static int dex_do_cmd_locked(struct dex_device *dex, int cmd, int n, void *ptr)
 
 	spin_lock_irqsave(&dex->lock, flags);
 
-	dex->sector = n;
+	dex->frame = n;
 	dex->data = ptr;
 
 	for (i = 0; i <= DEX_MAX_RETRY; i++) {
@@ -620,40 +620,40 @@ static int dex_do_cmd(struct dex_device *dex, int cmd, int n, void *ptr)
 }
 
 /*
- * Read/write a number of consecutive sectors from/to the device.  Returns <0
+ * Read/write a number of consecutive frames from/to the device.  Returns <0
  * in case of an error.
  */
 static int dex_transfer(struct dex_device *dex,
-			unsigned int sector, unsigned int len,
+			unsigned int frame, unsigned int len,
 			char *buffer, int write)
 {
 	int error = 0;
 
-	PDEBUG("> dex_transfer(%p, %u, %u, %p, %i", dex, sector, len,
+	PDEBUG("> dex_transfer(%p, %u, %u, %p, %i", dex, frame, len,
 					buffer, write);
 
-	for (; len > 0; sector++, len--) {
+	for (; len > 0; frame++, len--) {
 		/* Make sure to keep SEEK/WRITE together */
 		if (mutex_lock_interruptible(&dex->command_mutex))
 			return -ERESTARTSYS;
 
 		if (write && (dex->model == DEX_MODEL_N64)) {
 			error = dex_do_cmd_locked(dex,
-						DEX_CMD_SEEK, sector, NULL);
+						DEX_CMD_SEEK, frame, NULL);
 			if (error < 0)
 				break;
 		}
 
 		error = dex_do_cmd_locked(dex,
 					(write ? DEX_CMD_WRITE : DEX_CMD_READ),
-					sector, buffer);
+					frame, buffer);
 
 		mutex_unlock(&dex->command_mutex);
 
 		if (error < 0)
 			break;
 
-		buffer += dex_sector_size(dex);
+		buffer += dex_frame_size(dex);
 	}
 
 	PDEBUG("< dex_transfer := %i", error);
@@ -782,26 +782,26 @@ static DEVICE_ATTR(firmware_version, S_IRUGO, dex_show_firmware_version, NULL);
  */
 static inline void dex_block_do_bio(struct dex_device *dex, struct bio *bio)
 {
-	sector_t sector;
+	sector_t frame;
 	struct bio_vec *bvec;
 	int i;
 	int error = 0;
 
 	PDEBUG(">> dex_block_do_bio(%p, %p)", dex, bio);
 
-	sector = bio->bi_sector << (9 - dex_sector_shift(dex));
+	frame = bio->bi_sector << (9 - dex_frame_shift(dex));
 
 	bio_for_each_segment(bvec, bio, i) {
-		sector_t len = (bvec->bv_len >> dex_sector_shift(dex));
+		sector_t len = (bvec->bv_len >> dex_frame_shift(dex));
 
-		error = dex_transfer(dex, sector, len,
+		error = dex_transfer(dex, frame, len,
 					kmap(bvec->bv_page) + bvec->bv_offset,
 					bio_data_dir(bio) == WRITE);
 
 		if (error < 0)
 			break;
 
-		sector += len;
+		frame += len;
 	}
 
 	bio_endio(bio, error);
