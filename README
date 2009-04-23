@@ -44,6 +44,7 @@ DexDrive to a serial port, the block device is created by running dexattach on
 that serial port:
 
     $ dexattach --check --verbose /dev/ttyS0
+    Opening /dev/ttyS0 and setting line discipline
     Device number is 254:0
 
 (If you get a "Cannot set line discipline: Invalid argument" error, it is most

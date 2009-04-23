@@ -200,7 +200,7 @@ const char help_msg[] =
   "    -c, --check    abort if a DexDrive is not connected\n"
   "    -D, --daemon   fork and run in background\n"
   "    -l, --ldisc=N  override the default line discipline number\n"
-  "    -v, --verbose  display the major/minor numbers of the created block device\n"
+  "    -v, --verbose  display additional information\n"
   "    -h, --help     display this help and exit\n"
   ;
 
@@ -285,6 +285,9 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
+	if (verbose)
+		printf("Opening %s and setting line discipline\n", devname);
+
 	if (dex_set_tty(fd, ldisc, check) < 0) {
 		perror("Cannot set line discipline");
 		return 1;
@@ -294,6 +297,9 @@ int main(int argc, char **argv) {
 		print_dev(fd);
 
 	if (is_daemon) {
+		if (verbose)
+			puts("Forking to background");
+
 		if (daemon(0, 0) < 0) {
 			perror("Cannot run in daemon");
 			return 1;
