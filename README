@@ -67,8 +67,8 @@ Up to four block devices can be active at the same time.
 OTHER FEATURES
 --------------
 
-While the /dev/dexdriveN device is held open, two sysfs entries are created to
-provide the DexDrive model (PSX or N64) and firmware revision:
+Two sysfs entries are created to provide the DexDrive model (PSX or N64) and
+firmware revision:
 
     $ cat /sys/block/dexdrive0/model
     PSX

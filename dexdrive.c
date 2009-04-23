@@ -156,10 +156,12 @@ struct dex_device {
 	struct gendisk *gd;
 	/* Dummy request queue -- which we don't use */
 	struct request_queue *request_queue;
-	/* Work queue holding our pending bio requests */
+	/* Work queue holding our init and pending bio requests */
 	struct workqueue_struct *wq;
 	/* Work queue name */
 	char wq_name[20];
+	/* Work queue item for initialization */
+	struct work_struct init_work;
 };
 
 /* This is just to remember which values are currently in use */
@@ -657,13 +659,16 @@ static int dex_transfer(struct dex_device *dex,
 	return error;
 }
 
-/* Used by dex_spin_up(), to avoid a bunch of gotos.  Not for external use. */
-static int dex_spin_up_locked(struct dex_device *dex)
+/*
+ * Called by dex_init_device(), to avoid a bunch of gotos.  Not for external
+ * use.
+ */
+static int dex_init_device_locked(struct dex_device *dex)
 {
 	char init_data[5];
 	int ret;
 
-	PDEBUG("> dex_spin_up(%p)", dex);
+	PDEBUG("> dex_init_device_locked(%p)", dex);
 
 	ret = dex_do_cmd_locked(dex, DEX_CMD_INIT, 0, init_data);
 	if (ret < 0)
@@ -678,39 +683,26 @@ static int dex_spin_up_locked(struct dex_device *dex)
 
 	PDEBUG(" model is %i", dex->model);
 
-	/* A regular PSX memory card holds 128 KiB; a N64 card holds 32 KiB */
-	set_capacity(dex->gd, (dex->model == DEX_MODEL_PSX ? 128 : 32) * 2);
-
 	dex->firmware_version = init_data[4];
 
 	ret = dex_do_cmd_locked(dex, DEX_CMD_MAGIC, 0, NULL);
-	if (ret < 0)
-		return ret;
 
-	ret = dex_do_cmd_locked(dex, DEX_CMD_STATUS, 0, NULL);
-	if (ret < 0)
-		return ret;
-
-	PDEBUG("< dex_spin_up := %i", ret);
-
-	/* Don't bother turning on the light if no card is present */
-	if (ret == 0)
-		dex_do_cmd_locked(dex, DEX_CMD_ON, 0, NULL);
+	PDEBUG("< dex_init_device_locked := %i", ret);
 
 	return ret;
 }
 
 /*
- * Initialize the device.  Returns -ENXIO if no card is inserted.
+ * Initialize the device, bringing it out of its "pouting" stage.
  */
-static int dex_spin_up(struct dex_device *dex)
+static int dex_init_device(struct dex_device *dex)
 {
 	int ret;
 
 	if (mutex_lock_interruptible(&dex->command_mutex))
 		return -ERESTARTSYS;
 
-	ret = dex_spin_up_locked(dex);
+	ret = dex_init_device_locked(dex);
 
 	mutex_unlock(&dex->command_mutex);
 
@@ -718,7 +710,38 @@ static int dex_spin_up(struct dex_device *dex)
 }
 
 /*
- * Turn off the device.  All this currently does is turn off the light.
+ * Spin up the device.  (This currently re-initializes it as well, but this
+ * may go away in the future.)
+ *
+ * Returns -ENXIO if no card is inserted.
+ */
+static int dex_spin_up(struct dex_device *dex)
+{
+	int ret;
+
+	/*
+	 * Re-initialize the device.  This is not needed, but it doesn't take
+	 * much time, and it allows people to plug/unplug the device between
+	 * open calls.  It also saves us the trouble of remembering if this
+	 * failed the first time.  <g>
+	 */
+	ret = dex_init_device(dex);
+
+	/* A sneaky user might have plugged in a different model */
+	set_capacity(dex->gd, (dex->model == DEX_MODEL_PSX ? 128 : 32) * 2);
+
+	ret = dex_do_cmd(dex, DEX_CMD_STATUS, 0, NULL);
+	if (ret < 0)
+		return ret;
+
+	/* We don't really care if this fails */
+	dex_do_cmd(dex, DEX_CMD_ON, 0, NULL);
+
+	return ret;
+}
+
+/*
+ * Spin down the device.  All this currently does is turn off the light.
  */
 static void dex_spin_down(struct dex_device *dex)
 {
@@ -890,7 +913,7 @@ static int dex_block_open(COMPAT_OPEN_PARAMS)
 
 	/* Initialize the device if we are the first to open it */
 	if (ret == 0) {
-		/* Safety measure */
+		/* Make sure that initialization is done */
 		flush_workqueue(dex->wq);
 
 		ret = dex_spin_up(dex);
@@ -898,18 +921,6 @@ static int dex_block_open(COMPAT_OPEN_PARAMS)
 			goto out;
 
 		check_disk_change(compat_open_get_bdev());
-
-		/* Now we create our sysfs files */
-
-		ret = device_create_file(disk_to_dev(dex->gd),
-						&dev_attr_model);
-		if (ret < 0)
-			goto out;
-
-		ret = device_create_file(disk_to_dev(dex->gd),
-						&dev_attr_firmware_version);
-		if (ret < 0)
-			goto out;
 	}
 
 out:
@@ -938,13 +949,8 @@ static int dex_block_release(COMPAT_RELEASE_PARAMS)
 	dex = compat_release_get_disk()->private_data;
 
 	/* FIXME: Yuck */
-	if (dex->tty && dex->open_count == 2) {
-		device_remove_file(disk_to_dev(dex->gd),
-						&dev_attr_model);
-		device_remove_file(disk_to_dev(dex->gd),
-						&dev_attr_firmware_version);
+	if (dex->tty && dex->open_count == 2)
 		dex_spin_down(dex);
-	}
 
 	dex_put(dex);
 
@@ -983,6 +989,7 @@ static struct block_device_operations dex_bdops = {
 /*
  * Set up the block device half of the dex_device structure.
  */
+static void dex_block_post_setup_work (struct work_struct *work);
 static int dex_block_setup(struct dex_device *dex)
 {
 	int ret;
@@ -1027,6 +1034,16 @@ static int dex_block_setup(struct dex_device *dex)
 	dex->gd->flags |= GENHD_FL_REMOVABLE;
 	dex->gd->private_data = dex;
 	snprintf(dex->gd->disk_name, 32, "dexdrive%u", dex->i);
+
+	/*
+	 * Now that everything is set, add our post-setup item to the work
+	 * queue.  This cannot be done right away, since we are still in the
+	 * process of attaching our line discipline to the tty.  (It can be
+	 * started right away, but it won't complete.)
+	 */
+	INIT_WORK(&dex->init_work, dex_block_post_setup_work);
+	queue_work(dex->wq, &dex->init_work);
+
 	add_disk(dex->gd);
 
 	return 0;
@@ -1039,6 +1056,55 @@ err:
 }
 
 /*
+ * Complete the block device setup, once we are actually able to communicate
+ * with the device.
+ */
+static int dex_block_post_setup(struct dex_device *dex)
+{
+	int ret;
+
+	ret = dex_init_device(dex);
+	if (ret < 0)
+		return ret;
+
+	/* A regular PSX memory card holds 128 KiB; a N64 card holds 32 KiB */
+	set_capacity(dex->gd, (dex->model == DEX_MODEL_PSX ? 128 : 32) * 2);
+
+	/* Now we create our sysfs files */
+
+	ret = device_create_file(disk_to_dev(dex->gd), &dev_attr_model);
+	if (ret < 0)
+		goto err;
+	ret = device_create_file(disk_to_dev(dex->gd), &dev_attr_firmware_version);
+	if (ret < 0)
+		goto err;
+
+	return 0;
+
+err:
+	device_remove_file(disk_to_dev(dex->gd), &dev_attr_model);
+	device_remove_file(disk_to_dev(dex->gd), &dev_attr_firmware_version);
+
+	return ret;
+}
+
+/*
+ * Work queue item responsible for calling dex_block_post_setup().
+ */
+static void dex_block_post_setup_work (struct work_struct *work)
+{
+	struct dex_device *dex = container_of(work, struct dex_device,
+								init_work);
+
+	/*
+	 * We currently ignore whether this succeeds or fails, since
+	 * dex_init_device() is called again on open.  (As to the sysfs
+	 * files, do we really care if they are not created?)
+	 */
+	dex_block_post_setup(dex);
+}
+
+/*
  * Tear down the block device half of the dex_device structure.
  */
 static void dex_block_teardown(struct dex_device *dex)
@@ -1047,7 +1113,6 @@ static void dex_block_teardown(struct dex_device *dex)
 
 	PDEBUG("> dex_block_teardown(%p)", dex);
 
-	/* These may have been left behind */
 	device_remove_file(disk_to_dev(dex->gd), &dev_attr_model);
 	device_remove_file(disk_to_dev(dex->gd), &dev_attr_firmware_version);
 
