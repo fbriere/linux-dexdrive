@@ -25,13 +25,11 @@
 #include <linux/kernel.h>
 #include <linux/bitmap.h>
 #include <linux/completion.h>
-#include <linux/kthread.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>		/* kmalloc() */
 #include <linux/string.h>	/* memcpy() */
 #include <linux/spinlock.h>
-#include <linux/wait.h>
-#include <linux/sched.h>	/* linux/wait.h should include this one */
+#include <linux/workqueue.h>
 
 #include <linux/blkdev.h>
 #include <linux/tty.h>
@@ -158,12 +156,10 @@ struct dex_device {
 	struct gendisk *gd;
 	/* Dummy request queue -- which we don't use */
 	struct request_queue *request_queue;
-	/* Stack of block IO operations we need to perform */
-	struct bio *bio_head, *bio_tail;
-	/* Kernel thread responsible for dealing with the bio stack */
-	struct task_struct *thread;
-	/* Wait queue used to wake up the thread when filling the stack */
-	wait_queue_head_t thread_wait;
+	/* Work queue holding our pending bio requests */
+	struct workqueue_struct *wq;
+	/* Work queue name */
+	char wq_name[20];
 };
 
 /* This is just to remember which values are currently in use */
@@ -778,6 +774,16 @@ static DEVICE_ATTR(firmware_version, S_IRUGO, dex_show_firmware_version, NULL);
 /* Block device functions */
 
 /*
+ * We cannot store any private data in a work_struct, so we create a
+ * container for this purpose.
+ */
+struct dex_bio_work {
+	struct dex_device	*dex;
+	struct bio		*bio;
+	struct work_struct	work;
+};
+
+/*
  * Handle a pending block IO operation.
  */
 static inline void dex_block_do_bio(struct dex_device *dex, struct bio *bio)
@@ -810,53 +816,26 @@ static inline void dex_block_do_bio(struct dex_device *dex, struct bio *bio)
 }
 
 /*
- * Add a bio to the queue
+ * Process and remove a block IO work item from the work queue.
  */
-static void dex_block_add_bio(struct dex_device *dex, struct bio *bio)
+static void dex_block_do_bio_work(struct work_struct *work)
 {
-	unsigned long flags;
+	struct dex_bio_work *bio_work =
+				container_of(work, struct dex_bio_work, work);
 
-	spin_lock_irqsave(&dex->lock, flags);
+	dex_block_do_bio(bio_work->dex, bio_work->bio);
 
-	if (dex->bio_tail)
-		dex->bio_tail->bi_next = bio;
-        else
-		dex->bio_head = bio;
-
-	dex->bio_tail = bio;
-
-	spin_unlock_irqrestore(&dex->lock, flags);
-}
-
-/*
- * Remove a bio from the queue
- */
-static struct bio *dex_block_get_bio(struct dex_device *dex)
-{
-	struct bio *bio;
-	unsigned long flags;
-
-	spin_lock_irqsave(&dex->lock, flags);
-
-	if ((bio = dex->bio_head)) {
-		if (bio == dex->bio_tail)
-			dex->bio_tail = NULL;
-		dex->bio_head = bio->bi_next;
-		bio->bi_next = NULL;
-	}
-
-	spin_unlock_irqrestore(&dex->lock, flags);
-
-	return bio;
+	kfree(bio_work);
 }
 
 /*
  * Called by the kernel when a new block IO operation is created, which we
- * add to the queue for dex_block_thread() to handle.
+ * add to the work queue.
  */
 static int dex_block_make_request(struct request_queue *queue, struct bio *bio)
 {
 	struct dex_device *dex = queue->queuedata;
+	struct dex_bio_work *bio_work;
 
 	PDEBUG("> dex_block_make_request(%p, %p)", queue, bio);
 
@@ -866,40 +845,19 @@ static int dex_block_make_request(struct request_queue *queue, struct bio *bio)
 		return 0;
 	}
 
-	dex_block_add_bio(dex, bio);
-	wake_up(&dex->thread_wait);
-
-	PDEBUG("< dex_block_make_request");
-
-	return 0;
-}
-
-/*
- * A kernel thread dedicated to processing bio's; it merely waits for more to
- * appear on the stack, and dispatches them to dex_block_do_bio().
- */
-static int dex_block_thread(void *data)
-{
-	struct dex_device *dex = data;
-	struct bio *bio;
-
-	PDEBUG(">> dex_block_thread starting");
-
-	/* set_user_nice(current, -20); */
-
-	while (!kthread_should_stop() || dex->bio_head) {
-		wait_event(dex->thread_wait,
-				dex->bio_head || kthread_should_stop());
-
-		if (! dex->bio_head)
-			continue;
-
-		bio = dex_block_get_bio(dex);
-
-		dex_block_do_bio(dex, bio);
+	if ((bio_work = kmalloc(sizeof(*bio_work), GFP_KERNEL)) == NULL) {
+		warn("cannot allocate bio_work struct");
+		bio_io_error(bio);
+		return 0;
 	}
 
-	PDEBUG("<< dex_block_thread exiting");
+	bio_work->dex = dex;
+	bio_work->bio = bio;
+
+	INIT_WORK(&bio_work->work, dex_block_do_bio_work);
+	queue_work(dex->wq, &bio_work->work);
+
+	PDEBUG("< dex_block_make_request");
 
 	return 0;
 }
@@ -932,7 +890,9 @@ static int dex_block_open(COMPAT_OPEN_PARAMS)
 
 	/* Initialize the device if we are the first to open it */
 	if (ret == 0) {
-		/* FIXME: Wait for dex_block_thread to empty its queue */
+		/* Safety measure */
+		flush_workqueue(dex->wq);
+
 		ret = dex_spin_up(dex);
 		if (ret < 0)
 			goto out;
@@ -1045,15 +1005,13 @@ static int dex_block_setup(struct dex_device *dex)
 	 */
 	dex->request_queue->backing_dev_info.ra_pages = 0;
 
-	dex->bio_head = dex->bio_tail = NULL;
+	/* Create our bio work queue */
+	snprintf(dex->wq_name, sizeof(dex->wq_name), "dexdrive%d", dex->i);
+	dex->wq = create_singlethread_workqueue(dex->wq_name);
 
-	init_waitqueue_head(&dex->thread_wait);
-	dex->thread = kthread_run(dex_block_thread, dex, "dexdrive%d", dex->i);
-
-	if (IS_ERR(dex->thread)) {
-		warn("cannot create thread");
-		ret = PTR_ERR(dex->thread);
-		goto err;
+	if (!dex->wq) {
+		warn("cannot create workqueue");
+		return -ENOMEM;
 	}
 
 	dex->gd = alloc_disk(1);
@@ -1074,9 +1032,6 @@ static int dex_block_setup(struct dex_device *dex)
 	return 0;
 
 err:
-	if (!IS_ERR(dex->thread))
-		kthread_stop(dex->thread);
-
 	if (dex->request_queue)
 		blk_cleanup_queue(dex->request_queue);
 
@@ -1103,7 +1058,7 @@ static void dex_block_teardown(struct dex_device *dex)
 	dex->request_queue->queuedata = NULL;
 	spin_unlock_irqrestore(&dex->lock, flags);
 
-	kthread_stop(dex->thread);
+	destroy_workqueue(dex->wq);
 
 	put_disk(dex->gd);
 
