@@ -1,0 +1,18 @@
+dexattach
+
+#
+# Linux kernel object files follow
+#
+
+*.o
+*.o.*
+*.ko
+.*.ko.*
+*.mod.c
+
+modules.order
+Module.markers
+Module.symvers
+
+.tmp_versions/
+
