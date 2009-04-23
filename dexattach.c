@@ -1,5 +1,5 @@
 /*
-    Utility to set the line discipline to the DexDrive block device driver
+    Utility to set the line discipline to the DexDrive block driver
     Copyright (C) 2002,2009  Frédéric Brière
 
     This program is free software; you can redistribute it and/or modify

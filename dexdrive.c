@@ -1,5 +1,5 @@
 /*
-    dexdrive.c: DexDrive block device driver for Linux
+    dexdrive.c: Linux block driver for the DexDrive
     Copyright (C) 2002,2009  Frédéric Brière
 
     This program is free software; you can redistribute it and/or modify
@@ -1331,6 +1331,6 @@ module_exit(dex_cleanup);
 
 /* Apparently, the kernel is not ready for UTF-8 yet */
 MODULE_AUTHOR("Frederic Briere <fbriere@fbriere.net>");
-MODULE_DESCRIPTION("DexDrive block device driver");
+MODULE_DESCRIPTION("DexDrive block driver");
 MODULE_LICENSE("GPL");
 

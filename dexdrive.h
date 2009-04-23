@@ -1,5 +1,5 @@
 /*
-    dexdrive.h: DexDrive block device driver for Linux
+    dexdrive.h: Linux block driver for the DexDrive
     Copyright (C) 2002,2009  Frédéric Brière
 
     This program is free software; you can redistribute it and/or modify
