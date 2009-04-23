@@ -997,6 +997,11 @@ static int dex_block_release(COMPAT_RELEASE_PARAMS)
 /*
  * Called by our own call to check_disk_change() in dex_block_open().
  *
+ * Unfortunately, there's not much for us to report.  While the PSX model can
+ * indeed detect a media change (unlike the N64 model), it will keep reporting
+ * the media as changed until the next write.  That's of no use to us, unless
+ * we're willing to write to the card just for the sake of it.
+ *
  * It is somewhat unclear what we should do in our case, where we have a
  * removable media, but cannot tell if it has been changed.  The safest
  * option is probably to always return true, which is what we do.  And
