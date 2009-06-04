@@ -839,7 +839,7 @@ static inline void dex_block_do_bio(struct dex_device *dex, struct bio *bio)
 }
 
 /*
- * Process and remove a block IO work item from the work queue.
+ * Process a block IO work item from the work queue.
  */
 static void dex_block_do_bio_work(struct work_struct *work)
 {
@@ -1137,8 +1137,7 @@ static void dex_block_teardown(struct dex_device *dex)
 /* tty functions */
 
 /*
- * Send as much of our buffer as possible to the tty driver.  This should be
- * called while holding the spinlock.
+ * Send as much of our buffer as possible to the tty driver.
  */
 static void dex_tty_write(struct dex_device *dex)
 {
