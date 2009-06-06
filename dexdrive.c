@@ -729,6 +729,8 @@ static int dex_spin_up(struct dex_device *dex)
 	 * failed the first time.  <g>
 	 */
 	ret = dex_init_device(dex);
+	if (ret < 0)
+		return ret;
 
 	ret = dex_do_cmd(dex, DEX_CMD_STATUS, 0, NULL);
 	if (ret < 0)
