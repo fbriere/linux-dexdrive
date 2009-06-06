@@ -706,6 +706,9 @@ static int dex_init_device(struct dex_device *dex)
 
 	mutex_unlock(&dex->command_mutex);
 
+	/* A regular PSX memory card holds 128 KiB; a N64 card holds 32 KiB */
+	set_capacity(dex->gd, (dex->model == DEX_MODEL_PSX ? 128 : 32) * 2);
+
 	return ret;
 }
 
@@ -726,9 +729,6 @@ static int dex_spin_up(struct dex_device *dex)
 	 * failed the first time.  <g>
 	 */
 	ret = dex_init_device(dex);
-
-	/* A sneaky user might have plugged in a different model */
-	set_capacity(dex->gd, (dex->model == DEX_MODEL_PSX ? 128 : 32) * 2);
 
 	ret = dex_do_cmd(dex, DEX_CMD_STATUS, 0, NULL);
 	if (ret < 0)
@@ -1066,9 +1066,6 @@ static int dex_block_post_setup(struct dex_device *dex)
 	ret = dex_init_device(dex);
 	if (ret < 0)
 		return ret;
-
-	/* A regular PSX memory card holds 128 KiB; a N64 card holds 32 KiB */
-	set_capacity(dex->gd, (dex->model == DEX_MODEL_PSX ? 128 : 32) * 2);
 
 	/* Now we create our sysfs files */
 
