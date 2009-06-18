@@ -281,7 +281,7 @@ REPLIES
 
   Checksum is the XOR of all data bytes, and the two bytes of the frame
   number as they were sent with the READ command.  (In other words, before
-  they were ORed with 0x7f for the N64 model.)
+  they were ANDed with 0x7f for the N64 model.)
 
   If the card was removed during the read, only a partial response will be
   sent back.
