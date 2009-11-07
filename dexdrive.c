@@ -1000,7 +1000,7 @@ static int dex_block_setup(struct dex_device *dex)
 	if (!dex->request_queue)
 		return -ENOMEM;
 
-	blk_queue_hardsect_size(dex->request_queue, 512);
+	blk_queue_logical_block_size(dex->request_queue, 512);
 
 	dex->request_queue->queuedata = dex;
 	blk_queue_make_request(dex->request_queue, dex_block_make_request);

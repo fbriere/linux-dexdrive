@@ -30,6 +30,11 @@
 #endif
 
 
+/* hardsect_size was renamed to logical_block_size in 2.6.31 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31)
+# define blk_queue_logical_block_size blk_queue_hardsect_size
+#endif
+
 /* This was defined in 2.6.28 */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
 # define disk_to_dev(disk)	(&(disk)->dev)
