@@ -857,7 +857,8 @@ static void dex_block_do_bio_work(struct work_struct *work)
  * Called by the kernel when a new block IO operation is created, which we
  * add to the work queue.
  */
-static int dex_block_make_request(struct request_queue *queue, struct bio *bio)
+static COMPAT_REQUEST_RETTYPE
+dex_block_make_request(struct request_queue *queue, struct bio *bio)
 {
 	struct dex_device *dex = queue->queuedata;
 	struct dex_bio_work *bio_work;
@@ -867,13 +868,13 @@ static int dex_block_make_request(struct request_queue *queue, struct bio *bio)
 	if (!dex) {
 		/* We are shutting down -- drop everything on the floor */
 		bio_io_error(bio);
-		return 0;
+		COMPAT_REQUEST_RETURN(0);
 	}
 
 	if ((bio_work = kmalloc(sizeof(*bio_work), GFP_KERNEL)) == NULL) {
 		warn("cannot allocate bio_work struct");
 		bio_io_error(bio);
-		return 0;
+		COMPAT_REQUEST_RETURN(0);
 	}
 
 	bio_work->dex = dex;
@@ -884,7 +885,7 @@ static int dex_block_make_request(struct request_queue *queue, struct bio *bio)
 
 	PDEBUG("< dex_block_make_request");
 
-	return 0;
+	COMPAT_REQUEST_RETURN(0);
 }
 
 /*
