@@ -76,3 +76,14 @@
 #else
 # define compat_bio_bi_sector(bio)        bio->bi_iter.bi_sector
 #endif
+
+/* bio_for_each_segment() argument types changed in 3.14 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,14,0)
+# define COMPAT_BIO_VEC_TYPE            struct bio_vec *
+# define COMPAT_BVEC_ITER_TYPE          int
+# define compat_bvec(bvec)              (*bvec)
+#else
+# define COMPAT_BIO_VEC_TYPE            struct bio_vec
+# define COMPAT_BVEC_ITER_TYPE          struct bvec_iter
+# define compat_bvec(bvec)              bvec
+#endif

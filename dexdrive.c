@@ -814,19 +814,19 @@ struct dex_bio_work {
 static inline void dex_block_do_bio(struct dex_device *dex, struct bio *bio)
 {
 	sector_t frame;
-	struct bio_vec *bvec;
-	int i;
+	COMPAT_BIO_VEC_TYPE bvec;
+	COMPAT_BVEC_ITER_TYPE iter;
 	int error = 0;
 
 	PDEBUG(">> dex_block_do_bio(%p, %p)", dex, bio);
 
 	frame = compat_bio_bi_sector(bio) << (9 - dex_frame_shift(dex));
 
-	bio_for_each_segment(bvec, bio, i) {
-		sector_t len = (bvec->bv_len >> dex_frame_shift(dex));
+	bio_for_each_segment(bvec, bio, iter) {
+		sector_t len = (compat_bvec(bvec).bv_len >> dex_frame_shift(dex));
 
 		error = dex_transfer(dex, frame, len,
-					kmap(bvec->bv_page) + bvec->bv_offset,
+					kmap(compat_bvec(bvec).bv_page) + compat_bvec(bvec).bv_offset,
 					bio_data_dir(bio) == WRITE);
 
 		if (error < 0)
