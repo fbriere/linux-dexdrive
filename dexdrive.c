@@ -940,14 +940,15 @@ out:
 /*
  * Called when our block device is closed.
  */
-static int dex_block_release(COMPAT_RELEASE_PARAMS)
+static COMPAT_RELEASE_RETTYPE dex_block_release(COMPAT_RELEASE_PARAMS)
 {
 	struct dex_device *dex;
 
 	PDEBUG("> dex_block_release(...)");
 
 	if (mutex_lock_interruptible(&open_release_mutex))
-		return -ERESTARTSYS;
+		WARN_ON(1);
+		COMPAT_RELEASE_RETURN(-ERESTARTSYS);
 
 	dex = compat_release_get_disk()->private_data;
 
@@ -960,7 +961,7 @@ static int dex_block_release(COMPAT_RELEASE_PARAMS)
 	mutex_unlock(&open_release_mutex);
 
 	PDEBUG("< dex_block_release := %d", 0);
-	return 0;
+	COMPAT_RELEASE_RETURN(0);
 }
 
 /*

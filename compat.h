@@ -60,3 +60,12 @@
 # define COMPAT_REQUEST_RETTYPE		void
 # define COMPAT_REQUEST_RETURN(ret)	return
 #endif
+
+/* block_device_operations->release() returns void since 3.10 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
+# define COMPAT_RELEASE_RETTYPE         int
+# define COMPAT_RELEASE_RETURN(ret)     return(ret)
+#else
+# define COMPAT_RELEASE_RETTYPE         void
+# define COMPAT_RELEASE_RETURN(ret)     return
+#endif
