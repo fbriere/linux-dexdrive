@@ -820,7 +820,7 @@ static inline void dex_block_do_bio(struct dex_device *dex, struct bio *bio)
 
 	PDEBUG(">> dex_block_do_bio(%p, %p)", dex, bio);
 
-	frame = bio->bi_sector << (9 - dex_frame_shift(dex));
+	frame = compat_bio_bi_sector(bio) << (9 - dex_frame_shift(dex));
 
 	bio_for_each_segment(bvec, bio, i) {
 		sector_t len = (bvec->bv_len >> dex_frame_shift(dex));

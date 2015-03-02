@@ -69,3 +69,10 @@
 # define COMPAT_RELEASE_RETTYPE         void
 # define COMPAT_RELEASE_RETURN(ret)     return
 #endif
+
+/* bio->bi_sector moved to bio->bi_iter.bi_sector in 3.14 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,14,0)
+# define compat_bio_bi_sector(bio)        bio->bi_sector
+#else
+# define compat_bio_bi_sector(bio)        bio->bi_iter.bi_sector
+#endif
