@@ -835,7 +835,7 @@ static inline void dex_block_do_bio(struct dex_device *dex, struct bio *bio)
 		frame += len;
 	}
 
-	bio_endio(bio, error);
+	compat_bio_endio(bio, error);
 
 	PDEBUG("<< dex_block_do_bio");
 }

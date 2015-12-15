@@ -87,3 +87,10 @@
 # define COMPAT_BVEC_ITER_TYPE          struct bvec_iter
 # define compat_bvec(bvec)              bvec
 #endif
+
+/* bio errors are signaled via bio->bi_error since 4.3 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,3,0)
+# define compat_bio_endio(bio, error)   bio_endio(bio, error)
+#else
+# define compat_bio_endio(bio, error)   bio->bi_error = error; bio_endio(bio)
+#endif
