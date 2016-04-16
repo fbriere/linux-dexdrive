@@ -52,13 +52,16 @@
 # define compat_tty_write(tty)		tty->ops->write
 #endif
 
-/* (*make_request_fn)() returns void starting from 3.2 */
+/* (*make_request_fn)() return type was changed in 3.2 and 4.4 */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,2,0)
 # define COMPAT_REQUEST_RETTYPE		int
-# define COMPAT_REQUEST_RETURN(ret)	return(ret)
-#else
+# define COMPAT_REQUEST_RETURN()	return(0)
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4,4,0)
 # define COMPAT_REQUEST_RETTYPE		void
-# define COMPAT_REQUEST_RETURN(ret)	return
+# define COMPAT_REQUEST_RETURN()	return
+#else
+# define COMPAT_REQUEST_RETTYPE		blk_qc_t
+# define COMPAT_REQUEST_RETURN()	return(BLK_QC_T_NONE)
 #endif
 
 /* block_device_operations->release() returns void since 3.10 */

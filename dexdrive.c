@@ -868,13 +868,13 @@ dex_block_make_request(struct request_queue *queue, struct bio *bio)
 	if (!dex) {
 		/* We are shutting down -- drop everything on the floor */
 		bio_io_error(bio);
-		COMPAT_REQUEST_RETURN(0);
+		COMPAT_REQUEST_RETURN();
 	}
 
 	if ((bio_work = kmalloc(sizeof(*bio_work), GFP_KERNEL)) == NULL) {
 		warn("cannot allocate bio_work struct");
 		bio_io_error(bio);
-		COMPAT_REQUEST_RETURN(0);
+		COMPAT_REQUEST_RETURN();
 	}
 
 	bio_work->dex = dex;
@@ -885,7 +885,7 @@ dex_block_make_request(struct request_queue *queue, struct bio *bio)
 
 	PDEBUG("< dex_block_make_request");
 
-	COMPAT_REQUEST_RETURN(0);
+	COMPAT_REQUEST_RETURN();
 }
 
 /*
