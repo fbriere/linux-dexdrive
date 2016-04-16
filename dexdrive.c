@@ -946,9 +946,10 @@ static COMPAT_RELEASE_RETTYPE dex_block_release(COMPAT_RELEASE_PARAMS)
 
 	PDEBUG("> dex_block_release(...)");
 
-	if (mutex_lock_interruptible(&open_release_mutex))
+	if (mutex_lock_interruptible(&open_release_mutex)) {
 		WARN_ON(1);
 		COMPAT_RELEASE_RETURN(-ERESTARTSYS);
+	}
 
 	dex = compat_release_get_disk()->private_data;
 
