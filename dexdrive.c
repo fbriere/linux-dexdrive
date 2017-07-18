@@ -1015,7 +1015,7 @@ static int dex_block_setup(struct dex_device *dex)
 	 * unit is PAGE_CACHE_SIZE (4 KiB or more), which is still too big
 	 * for our purposes.
 	 */
-	dex->request_queue->backing_dev_info.ra_pages = 0;
+	compat_backing_dev_info_ptr(dex->request_queue)->ra_pages = 0;
 
 	/* Create our bio work queue */
 	snprintf(dex->wq_name, sizeof(dex->wq_name), "dexdrive%d", dex->i);

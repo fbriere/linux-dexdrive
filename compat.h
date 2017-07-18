@@ -97,3 +97,10 @@
 #else
 # define compat_bio_endio(bio, error)   bio->bi_error = error; bio_endio(bio)
 #endif
+
+/* request_queue->backing_dev_info is now a pointer since 4.11 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,11,0)
+# define compat_backing_dev_info_ptr(request_queue)  (&(request_queue->backing_dev_info))
+#else
+# define compat_backing_dev_info_ptr(request_queue)  request_queue->backing_dev_info
+#endif
