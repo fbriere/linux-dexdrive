@@ -92,10 +92,13 @@
 #endif
 
 /* bio errors are signaled via bio->bi_error since 4.3 */
+/* (now bi_status since 4.13) */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,3,0)
 # define compat_bio_endio(bio, error)   bio_endio(bio, error)
-#else
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4,13,0)
 # define compat_bio_endio(bio, error)   bio->bi_error = error; bio_endio(bio)
+#else
+# define compat_bio_endio(bio, error)   bio->bi_status = error; bio_endio(bio)
 #endif
 
 /* request_queue->backing_dev_info is now a pointer since 4.11 */
