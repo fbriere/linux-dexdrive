@@ -999,14 +999,14 @@ static int dex_block_setup(struct dex_device *dex)
 {
 	int ret;
 
-	dex->request_queue = blk_alloc_queue(GFP_KERNEL);
+	dex->request_queue = compat_blk_alloc_queue(dex_block_make_request);
 	if (!dex->request_queue)
 		return -ENOMEM;
 
 	blk_queue_logical_block_size(dex->request_queue, 512);
 
 	dex->request_queue->queuedata = dex;
-	blk_queue_make_request(dex->request_queue, dex_block_make_request);
+	compat_blk_queue_make_request(dex->request_queue, dex_block_make_request);
 
 	/*
 	 * Turn off readahead, which doesn't do us much good.  (The default

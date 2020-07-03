@@ -107,3 +107,14 @@
 #else
 # define compat_backing_dev_info_ptr(request_queue)  request_queue->backing_dev_info
 #endif
+
+/* blk_alloc_queue() and blk_queue_make_request() were merged in 5.7 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,7,0)
+# define compat_blk_alloc_queue(fn)                blk_alloc_queue(GFP_KERNEL)
+# define compat_blk_queue_make_request(queue, fn)  blk_queue_make_request(queue, fn)
+#else
+# define compat_blk_alloc_queue(fn)                blk_alloc_queue(fn, NUMA_NO_NODE)
+# define compat_blk_queue_make_request(queue, fn)
+#endif
+
+
