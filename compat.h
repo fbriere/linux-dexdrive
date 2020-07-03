@@ -138,3 +138,10 @@
 #define COMPAT_SET_SUBMIT_BIO(fn)	.submit_bio = (fn),
 
 #endif
+
+/* check_disk_change() was removed in 5.10 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,10,0)
+# define compat_check_disk_change(bdev)  check_disk_change(bdev)
+#else
+# define compat_check_disk_change(bdev)  bdev_check_media_change(bdev)
+#endif

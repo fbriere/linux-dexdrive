@@ -925,7 +925,7 @@ static int dex_block_open(COMPAT_OPEN_PARAMS)
 		if (ret < 0)
 			goto out;
 
-		check_disk_change(compat_open_get_bdev());
+		compat_check_disk_change(compat_open_get_bdev());
 	}
 
 out:
