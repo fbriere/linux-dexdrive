@@ -856,14 +856,16 @@ static void dex_block_do_bio_work(struct work_struct *work)
 /*
  * Called by the kernel when a new block IO operation is created, which we
  * add to the work queue.
+ *
+ * TODO: This should probably be renamed dex_block_submit_bio() at some point.
  */
 static COMPAT_REQUEST_RETTYPE
-dex_block_make_request(struct request_queue *queue, struct bio *bio)
+dex_block_make_request(COMPAT_REQUEST_PARAMS)
 {
-	struct dex_device *dex = queue->queuedata;
+	struct dex_device *dex = compat_request_get_queue()->queuedata;
 	struct dex_bio_work *bio_work;
 
-	PDEBUG("> dex_block_make_request(%p, %p)", queue, bio);
+	PDEBUG("> dex_block_make_request(%p)", bio);
 
 	if (!dex) {
 		/* We are shutting down -- drop everything on the floor */
@@ -988,6 +990,9 @@ static struct block_device_operations dex_bdops = {
 	.open			= dex_block_open,
 	.release		= dex_block_release,
 	.check_events		= dex_block_check_events,
+
+	/* Set .submit_bio if applicable (the lack of trailing comma is intentional) */
+	COMPAT_SET_SUBMIT_BIO(dex_block_make_request)
 };
 
 /*
