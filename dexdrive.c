@@ -975,20 +975,19 @@ static COMPAT_RELEASE_RETTYPE dex_block_release(COMPAT_RELEASE_PARAMS)
  *
  * It is somewhat unclear what we should do in our case, where we have a
  * removable media, but cannot tell if it has been changed.  The safest
- * option is probably to always return true, which is what we do.  And
- * since check_disk_change() only checks for true/false, we symbolically
- * return an error value.
+ * option is probably to always signal a media change, which is what we do.
  */
-static int dex_block_media_changed(struct gendisk *gd)
+static unsigned int dex_block_check_events(struct gendisk *gd,
+						unsigned int clearing)
 {
-	return -EINVAL;
+	return DISK_EVENT_MEDIA_CHANGE;
 }
 
 static struct block_device_operations dex_bdops = {
 	.owner			= THIS_MODULE,
 	.open			= dex_block_open,
 	.release		= dex_block_release,
-	.media_changed		= dex_block_media_changed,
+	.check_events		= dex_block_check_events,
 };
 
 /*
@@ -1035,6 +1034,7 @@ static int dex_block_setup(struct dex_device *dex)
 	dex->gd->major = major;
 	dex->gd->first_minor = dex->i;
 	dex->gd->fops = &dex_bdops;
+	dex->gd->events = DISK_EVENT_MEDIA_CHANGE;
 	dex->gd->queue = dex->request_queue;
 	dex->gd->flags |= GENHD_FL_REMOVABLE;
 	dex->gd->private_data = dex;

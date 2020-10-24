@@ -1,6 +1,6 @@
 /*
  * Declarations to provide compatibility with all kernel versions from
- * 2.6.25 up, without littering the code with #ifdefs all over.
+ * 2.6.36 up, without littering the code with #ifdefs all over.
  */
 
 #include <linux/version.h>

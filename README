@@ -79,7 +79,7 @@ firmware revision:
 COMPATIBILITY
 -------------
 
-This module is compatible with kernel versions 2.6.25 and up.
+This module is compatible with kernel versions 2.6.36 and up.
 
 It supports both the PlayStation and Nintendo 64 DexDrive models, using any
 compatible memory card.  No explicit support is provided for non-conventional
