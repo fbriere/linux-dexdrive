@@ -112,3 +112,26 @@
 #else
 # define COMPAT_SET_MAGIC
 #endif
+
+/* tty_ldisc has seen many changes in 5.14:
+ *  - The fp argument to tty_ldisc_ops.receive_buf() is now marked as const.
+ *  - The disc argument to tty_register_ldisc() has been removed; the caller
+ *    now sets tty_ldisc_ops.num themselves beforehand.
+ *  - Similarly, the disc argument to tty_unregister_ldisc() has been
+ *    replaced with a tty_ldisc_ops, with .num acting in its stead.
+ *  - tty_unregister_ldisc() no longer returns anything.
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)
+# define COMPAT_TTY_RECEIVE_BUF_CONST
+# define compat_tty_register_ldisc(disc, new_ldisc) \
+	tty_register_ldisc(disc, new_ldisc)
+# define compat_tty_unregister_ldisc(ldisc) \
+	tty_unregister_ldisc((ldisc)->num)
+#else
+# define COMPAT_TTY_RECEIVE_BUF_CONST	const
+/* (Statement expressions are supported both by GCC and Clang) */
+# define compat_tty_register_ldisc(disc, new_ldisc) \
+	({ (new_ldisc)->num = disc; tty_register_ldisc(new_ldisc); })
+# define compat_tty_unregister_ldisc(ldisc) \
+	({ tty_unregister_ldisc(ldisc); 0; })
+#endif

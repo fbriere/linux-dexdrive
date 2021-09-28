@@ -1175,7 +1175,9 @@ static void dex_tty_write(struct dex_device *dex)
 
 /* Called by the tty driver when data is coming in */
 static void dex_tty_receive_buf(struct tty_struct *tty,
-				const unsigned char *buf, char *fp, int count)
+				const unsigned char *buf,
+				COMPAT_TTY_RECEIVE_BUF_CONST char *fp,
+				int count)
 {
 	struct dex_device *dex = tty->disc_data;
 	unsigned long flags;
@@ -1327,7 +1329,7 @@ static struct tty_ldisc_ops dex_ldisc_ops = {
 static void dex_cleanup(void)
 {
 	PDEBUG("> dex_cleanup()");
-	if (tty_unregister_ldisc(ldisc) != 0)
+	if (compat_tty_unregister_ldisc(&dex_ldisc_ops) != 0)
 		warn("can't unregister ldisc");
 	unregister_blkdev(major, DEX_NAME);
 	PDEBUG("< dex_cleanup");
@@ -1346,7 +1348,7 @@ static int __init dex_init(void)
 		major = tmp;
 	PDEBUG("setting major to %d", major);
 
-	if (tty_register_ldisc(ldisc, &dex_ldisc_ops) != 0) {
+	if (compat_tty_register_ldisc(ldisc, &dex_ldisc_ops) != 0) {
 		warn("can't set ldisc");
 		dex_cleanup();
 		return -1;
