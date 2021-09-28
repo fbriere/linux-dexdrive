@@ -1019,11 +1019,13 @@ static int dex_block_setup(struct dex_device *dex)
 {
 	int ret;
 
+#ifndef COMPAT_USES_BLK_ALLOC_DISK
 	dex->request_queue = compat_blk_alloc_queue(dex_block_make_request);
 	if (!dex->request_queue)
 		return -ENOMEM;
 
 	dex_block_setup_request_queue(dex);
+#endif
 
 	/* Create our bio work queue */
 	snprintf(dex->wq_name, sizeof(dex->wq_name), "dexdrive%d", dex->i);
@@ -1034,7 +1036,7 @@ static int dex_block_setup(struct dex_device *dex)
 		return -ENOMEM;
 	}
 
-	dex->gd = alloc_disk(1);
+	dex->gd = compat_blk_alloc_disk();
 	if (! dex->gd) {
 		warn("cannot allocate gendisk struct");
 		ret = -ENOMEM;
@@ -1045,10 +1047,16 @@ static int dex_block_setup(struct dex_device *dex)
 	dex->gd->minors = 1;
 	dex->gd->fops = &dex_bdops;
 	dex->gd->events = DISK_EVENT_MEDIA_CHANGE;
-	dex->gd->queue = dex->request_queue;
 	dex->gd->flags |= GENHD_FL_REMOVABLE;
 	dex->gd->private_data = dex;
 	snprintf(dex->gd->disk_name, 32, "dexdrive%u", dex->i);
+
+#ifdef COMPAT_USES_BLK_ALLOC_DISK
+	dex->request_queue = dex->gd->queue;
+	dex_block_setup_request_queue(dex);
+#else
+	dex->gd->queue = dex->request_queue;
+#endif
 
 	/*
 	 * Now that everything is set, add our post-setup item to the work
@@ -1064,8 +1072,7 @@ static int dex_block_setup(struct dex_device *dex)
 	return 0;
 
 err:
-	if (dex->request_queue)
-		blk_cleanup_queue(dex->request_queue);
+	compat_blk_cleanup(dex);
 
 	return ret;
 }
@@ -1137,10 +1144,7 @@ static void dex_block_teardown(struct dex_device *dex)
 
 	destroy_workqueue(dex->wq);
 
-	put_disk(dex->gd);
-
-	if (dex->request_queue)
-		blk_cleanup_queue(dex->request_queue);
+	compat_blk_cleanup(dex);
 
 	PDEBUG("< dex_block_teardown");
 }

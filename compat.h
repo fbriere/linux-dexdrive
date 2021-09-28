@@ -135,3 +135,24 @@
 # define compat_tty_unregister_ldisc(ldisc) \
 	({ tty_unregister_ldisc(ldisc); 0; })
 #endif
+
+/* 5.14 introduces blk_alloc_disk(), which automatically allocates a
+ * request_queue along with the gendisk.  Among other things, this requires
+ * us to change the order in which we initialize both structures. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)
+# undef COMPAT_USES_BLK_ALLOC_DISK
+# define compat_blk_alloc_disk(dex)	alloc_disk(1)
+# define compat_blk_cleanup(dex) \
+	do { \
+		if (dex->gd) \
+			put_disk(dex->gd); \
+		if (dex->request_queue) \
+			blk_cleanup_queue(dex->request_queue); \
+	} while (0)
+#else
+# define COMPAT_USES_BLK_ALLOC_DISK
+# define compat_blk_alloc_disk(dex)	blk_alloc_disk(NUMA_NO_NODE)
+# define compat_blk_cleanup(dex) \
+	if (dex->gd) \
+		blk_cleanup_disk(dex->gd)
+#endif
