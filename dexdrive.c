@@ -902,7 +902,7 @@ static DEFINE_MUTEX(open_release_mutex);
 /*
  * Called when our block device is opened.
  */
-static int dex_block_open(COMPAT_OPEN_PARAMS)
+static int dex_block_open(struct block_device *bdev, fmode_t mode)
 {
 	struct dex_device *dex;
 	int ret;
@@ -912,7 +912,7 @@ static int dex_block_open(COMPAT_OPEN_PARAMS)
 	if (mutex_lock_interruptible(&open_release_mutex))
 		return -ERESTARTSYS;
 
-	dex = compat_open_get_disk()->private_data;
+	dex = bdev->bd_disk->private_data;
 
 	ret = dex_get(dex);
 
@@ -925,7 +925,7 @@ static int dex_block_open(COMPAT_OPEN_PARAMS)
 		if (ret < 0)
 			goto out;
 
-		compat_check_disk_change(compat_open_get_bdev());
+		compat_check_disk_change(bdev);
 	}
 
 out:
@@ -942,7 +942,7 @@ out:
 /*
  * Called when our block device is closed.
  */
-static COMPAT_RELEASE_RETTYPE dex_block_release(COMPAT_RELEASE_PARAMS)
+static COMPAT_RELEASE_RETTYPE dex_block_release(struct gendisk *disk, fmode_t mode)
 {
 	struct dex_device *dex;
 
@@ -953,7 +953,7 @@ static COMPAT_RELEASE_RETTYPE dex_block_release(COMPAT_RELEASE_PARAMS)
 		COMPAT_RELEASE_RETURN(-ERESTARTSYS);
 	}
 
-	dex = compat_release_get_disk()->private_data;
+	dex = disk->private_data;
 
 	/* FIXME: Yuck */
 	if (dex->tty && dex->open_count == 2)
@@ -1157,7 +1157,7 @@ static void dex_tty_write(struct dex_device *dex)
 	if (dex->tty && dex->count_out > 0) {
 		PDEBUG("writing %d bytes to device", dex->count_out);
 
-		i = (compat_tty_write(dex->tty))(dex->tty, dex->ptr_out,
+		i = dex->tty->ops->write(dex->tty, dex->ptr_out,
 							dex->count_out);
 		dex->ptr_out += i;
 		dex->count_out -= i;
