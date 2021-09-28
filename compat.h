@@ -133,7 +133,12 @@
 #else
 
 #define COMPAT_REQUEST_PARAMS		struct bio *bio
-#define compat_request_get_queue()	(bio->bi_disk->queue)
+/* Since 5.12, this pointer needs an extra indirection. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,12,0)
+# define compat_request_get_queue()	(bio->bi_disk->queue)
+#else
+# define compat_request_get_queue()	(bio->bi_bdev->bd_disk->queue)
+#endif
 /* (Notice the trailing comma) */
 #define COMPAT_SET_SUBMIT_BIO(fn)	.submit_bio = (fn),
 
