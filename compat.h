@@ -104,3 +104,11 @@
 #else
 # define compat_check_disk_change(bdev)  bdev_check_media_change(bdev)
 #endif
+
+/* ldisc_ops.magic was removed in 5.13 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,13,0)
+/* (Notice the trailing comma) */
+# define COMPAT_SET_MAGIC	.magic = TTY_LDISC_MAGIC,
+#else
+# define COMPAT_SET_MAGIC
+#endif

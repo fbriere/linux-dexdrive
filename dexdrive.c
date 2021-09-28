@@ -1309,7 +1309,6 @@ static void dex_tty_close(struct tty_struct *tty)
 }
 
 static struct tty_ldisc_ops dex_ldisc_ops = {
-	.magic		= TTY_LDISC_MAGIC,
 	.owner		= THIS_MODULE,
 	.name		= DEX_NAME,
 	.open		= dex_tty_open,
@@ -1317,6 +1316,9 @@ static struct tty_ldisc_ops dex_ldisc_ops = {
 	.ioctl		= dex_tty_ioctl,
 	.receive_buf	= dex_tty_receive_buf,
 	.write_wakeup	= dex_tty_write_wakeup,
+
+	/* Set .magic if applicable (the lack of trailing comma is intentional) */
+	COMPAT_SET_MAGIC
 };
 
 
