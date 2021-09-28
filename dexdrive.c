@@ -998,15 +998,8 @@ static struct block_device_operations dex_bdops = {
 /*
  * Set up the block device half of the dex_device structure.
  */
-static void dex_block_post_setup_work (struct work_struct *work);
-static int dex_block_setup(struct dex_device *dex)
+static void dex_block_setup_request_queue(struct dex_device *dex)
 {
-	int ret;
-
-	dex->request_queue = compat_blk_alloc_queue(dex_block_make_request);
-	if (!dex->request_queue)
-		return -ENOMEM;
-
 	blk_queue_logical_block_size(dex->request_queue, 512);
 
 	dex->request_queue->queuedata = dex;
@@ -1020,6 +1013,17 @@ static int dex_block_setup(struct dex_device *dex)
 	 * for our purposes.
 	 */
 	compat_backing_dev_info_ptr(dex->request_queue)->ra_pages = 0;
+}
+static void dex_block_post_setup_work (struct work_struct *work);
+static int dex_block_setup(struct dex_device *dex)
+{
+	int ret;
+
+	dex->request_queue = compat_blk_alloc_queue(dex_block_make_request);
+	if (!dex->request_queue)
+		return -ENOMEM;
+
+	dex_block_setup_request_queue(dex);
 
 	/* Create our bio work queue */
 	snprintf(dex->wq_name, sizeof(dex->wq_name), "dexdrive%d", dex->i);
