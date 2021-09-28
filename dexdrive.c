@@ -1038,6 +1038,7 @@ static int dex_block_setup(struct dex_device *dex)
 	}
 	dex->gd->major = major;
 	dex->gd->first_minor = dex->i;
+	dex->gd->minors = 1;
 	dex->gd->fops = &dex_bdops;
 	dex->gd->events = DISK_EVENT_MEDIA_CHANGE;
 	dex->gd->queue = dex->request_queue;
