@@ -1325,7 +1325,7 @@ static struct tty_ldisc_ops dex_ldisc_ops = {
 static void dex_cleanup(void)
 {
 	PDEBUG("> dex_cleanup()");
-	if (tty_register_ldisc(ldisc, NULL) != 0)
+	if (tty_unregister_ldisc(ldisc) != 0)
 		warn("can't unregister ldisc");
 	unregister_blkdev(major, DEX_NAME);
 	PDEBUG("< dex_cleanup");
