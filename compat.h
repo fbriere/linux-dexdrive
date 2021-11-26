@@ -56,10 +56,14 @@
 #endif
 
 /* request_queue->backing_dev_info is now a pointer since 4.11 */
+/* request_queue->backing_dev_info moved to disk->bdi in 5.15 */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,11,0)
-# define compat_backing_dev_info_ptr(request_queue)  (&(request_queue->backing_dev_info))
+# define compat_backing_dev_info_ptr(request_queue, disk)  (&(request_queue->backing_dev_info))
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0)
+# define compat_backing_dev_info_ptr(request_queue, disk)  request_queue->backing_dev_info
 #else
-# define compat_backing_dev_info_ptr(request_queue)  request_queue->backing_dev_info
+# include <linux/backing-dev-defs.h>
+# define compat_backing_dev_info_ptr(request_queue, disk)  disk->bdi
 #endif
 
 /* blk_alloc_queue() and blk_queue_make_request() were merged in 5.7 */

@@ -1012,7 +1012,7 @@ static void dex_block_setup_request_queue(struct dex_device *dex)
 	 * unit is PAGE_CACHE_SIZE (4 KiB or more), which is still too big
 	 * for our purposes.
 	 */
-	compat_backing_dev_info_ptr(dex->request_queue)->ra_pages = 0;
+	compat_backing_dev_info_ptr(dex->request_queue, dex->gd)->ra_pages = 0;
 }
 static void dex_block_post_setup_work (struct work_struct *work);
 static int dex_block_setup(struct dex_device *dex)
