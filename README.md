@@ -1,6 +1,7 @@
+[![Build](https://github.com/fbriere/linux-dexdrive/actions/workflows/main.yml/badge.svg)](https://github.com/fbriere/linux-dexdrive/actions/workflows/main.yml)
+
 Linux block driver for the DexDrive
 ===================================
-
 
 The DexDrive is a device that connects via the serial port, and allows access
 to PlayStation or Nintendo 64 memory cards (depending on the model).  This
