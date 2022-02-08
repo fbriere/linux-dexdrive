@@ -17,29 +17,29 @@ much larger (and faster) USB sticks for free with your breakfast cereal.
 whether or not it would make any sense?)
 
 Please note that if you're merely looking for a way to read/write memory
-cards, this driver is overkill.  Instead, you may want to look at Dexux
-<http://dexux.sourceforge.net/>, an application/library that does just that.
+cards, this driver is overkill.  Instead, you may want to look at [Dexux](
+http://dexux.sourceforge.net/), an application/library that does just that.
 
 
 COMPILATION
 -----------
 
 Compiling this module requires a fully configured kernel source tree.  By
-default, simply running "make" will compile against the source tree of the
+default, simply running `make` will compile against the source tree of the
 currently running kernel.  If this is not appropriate, you can specify the
 location of your kernel source tree:
 
     $ make KERNELDIR=/usr/src/linux
 
-This will compile the dexdrive.ko kernel module, as well as the dexattach
-utility.  You can install them both with "make install", with an optional
-DESTDIR argument if you don't want to install them as root.
+This will compile the `dexdrive.ko` kernel module, as well as the `dexattach`
+utility.  You can install them both with `make install`, with an optional
+`DESTDIR` argument if you don't want to install them as root.
 
 
 USAGE
 -----
 
-After loading the dexdrive module (with insmod or modprobe) and connecting a
+After loading the dexdrive module (with `insmod` or `modprobe`) and connecting a
 DexDrive to a serial port, the block device is created by running dexattach on
 that serial port:
 
@@ -47,17 +47,17 @@ that serial port:
     Opening /dev/ttyS0 and setting line discipline
     Device number is 254:0
 
-(If you get a "Cannot set line discipline: Invalid argument" error, it is most
+(If you get a `Cannot set line discipline: Invalid argument` error, it is most
 likely that the dexdrive module isn't loaded.)
 
 If you are running udev, a block device entry will be automatically created as
-/dev/dexdrive0.  If you are not running udev, you will need to create that
+`/dev/dexdrive0`.  If you are not running udev, you will need to create that
 entry yourself, as root:
 
     # mknod --mode=0660 /dev/dexdrive0 b 254 0
     # chgrp floppy /dev/dexdrive0
 
-At this point, you can use /dev/dexdrive0 like you would any other (tiny)
+At this point, you can use `/dev/dexdrive0` like you would any other (tiny)
 block device.  That device will remain active for as long as dexattach is
 running.
 
@@ -93,14 +93,14 @@ SOURCE
 
 The complete source for this driver can be found on GitHub:
 
-    <https://github.com/fbriere/linux-dexdrive>
+https://github.com/fbriere/linux-dexdrive
 
 
 CONTACT
 -------
 
-Author:  Frédéric Brière  <fbriere@fbriere.net>
+Author:  Frédéric Brière - fbriere@fbriere.net
 
 Please feel free to email me if you have any questions, bugs, patches, or
-general comments on my sanity for writing this driver.  :)
+general comments on my sanity for writing this driver.  :smile:
 
