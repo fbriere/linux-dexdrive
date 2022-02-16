@@ -8,8 +8,10 @@ dexattach
 *.o.*
 *.ko
 .*.ko.*
-*.mod.c
+*.mod
+*.mod.*
 
+*.cmd
 modules.order
 Module.markers
 Module.symvers
