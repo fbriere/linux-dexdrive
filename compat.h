@@ -163,3 +163,10 @@
 	if (dex->gd) \
 		blk_cleanup_disk(dex->gd)
 #endif
+
+/* add_disk() now returns a value in 5.15, marked __must_check in 5.16 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0)
+# define compat_add_disk(disk)		(add_disk(disk), 0)
+# else
+# define compat_add_disk(disk)		add_disk(disk)
+#endif

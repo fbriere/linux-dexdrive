@@ -1067,7 +1067,9 @@ static int dex_block_setup(struct dex_device *dex)
 	INIT_WORK(&dex->init_work, dex_block_post_setup_work);
 	queue_work(dex->wq, &dex->init_work);
 
-	add_disk(dex->gd);
+	ret = compat_add_disk(dex->gd);
+	if (ret)
+		return ret;
 
 	return 0;
 
