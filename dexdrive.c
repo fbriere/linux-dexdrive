@@ -1230,14 +1230,13 @@ static void dex_tty_write_wakeup(struct tty_struct *tty)
 }
 
 /* Called by the tty driver upon ioctl() */
-static int dex_tty_ioctl(struct tty_struct *tty, struct file *file,
-				unsigned int cmd, unsigned long arg)
+static int dex_tty_ioctl(COMPAT_IOCTL_PARAMS)
 {
 	struct dex_device *dex = tty->disc_data;
 	unsigned long flags;
 	int ret;
 
-	PDEBUG("> dex_tty_ioctl(%p, %p, 0x%8x, %lu)", tty, file, cmd, arg);
+	PDEBUG("> dex_tty_ioctl(%p, 0x%8x, %lu)", tty, cmd, arg);
 
 	spin_lock_irqsave(&dex->lock, flags);
 

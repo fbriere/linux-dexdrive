@@ -170,3 +170,15 @@
 # else
 # define compat_add_disk(disk)		add_disk(disk)
 #endif
+
+/* Since 5.17, ioctl() no longer takes a `file` argument. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,17,0)
+#define COMPAT_IOCTL_PARAMS		struct tty_struct *tty, \
+					struct file *file, \
+					unsigned int cmd, \
+					unsigned long arg
+#else
+#define COMPAT_IOCTL_PARAMS		struct tty_struct *tty, \
+					unsigned int cmd, \
+					unsigned long arg
+#endif
