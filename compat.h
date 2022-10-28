@@ -149,6 +149,11 @@
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)
 # undef COMPAT_USES_BLK_ALLOC_DISK
 # define compat_blk_alloc_disk(dex)	alloc_disk(1)
+#else
+# define COMPAT_USES_BLK_ALLOC_DISK
+# define compat_blk_alloc_disk(dex)	blk_alloc_disk(NUMA_NO_NODE)
+#endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)
 # define compat_blk_cleanup(dex) \
 	do { \
 		if (dex->gd) \
@@ -157,8 +162,6 @@
 			blk_cleanup_queue(dex->request_queue); \
 	} while (0)
 #else
-# define COMPAT_USES_BLK_ALLOC_DISK
-# define compat_blk_alloc_disk(dex)	blk_alloc_disk(NUMA_NO_NODE)
 # define compat_blk_cleanup(dex) \
 	if (dex->gd) \
 		blk_cleanup_disk(dex->gd)
