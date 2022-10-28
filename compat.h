@@ -153,6 +153,7 @@
 # define COMPAT_USES_BLK_ALLOC_DISK
 # define compat_blk_alloc_disk(dex)	blk_alloc_disk(NUMA_NO_NODE)
 #endif
+/* blk_cleanup_disk() was further removed in 6.0 */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)
 # define compat_blk_cleanup(dex) \
 	do { \
@@ -161,10 +162,12 @@
 		if (dex->request_queue) \
 			blk_cleanup_queue(dex->request_queue); \
 	} while (0)
-#else
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(6,0,0)
 # define compat_blk_cleanup(dex) \
 	if (dex->gd) \
 		blk_cleanup_disk(dex->gd)
+#else
+# define compat_blk_cleanup(dex)	put_disk(dex->gd)
 #endif
 
 /* add_disk() now returns a value in 5.15, marked __must_check in 5.16 */
