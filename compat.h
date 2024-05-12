@@ -106,10 +106,14 @@
 #endif
 
 /* check_disk_change() was removed in 5.10 */
+/* Its argument type was further changed in 6.5; see the definition of
+ * compat_block_open_checkchg_arg() below. */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,10,0)
 # define compat_check_disk_change(bdev)  check_disk_change(bdev)
-#else
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(6,5,0)
 # define compat_check_disk_change(bdev)  bdev_check_media_change(bdev)
+#else
+# define compat_check_disk_change(disk)  disk_check_media_change(disk)
 #endif
 
 /* ldisc_ops.magic was removed in 5.13 */
@@ -187,4 +191,24 @@
 #define COMPAT_IOCTL_PARAMS		struct tty_struct *tty, \
 					unsigned int cmd, \
 					unsigned long arg
+#endif
+
+/* The signatures of .open and .release were changed in 6.5
+ *
+ * Within .open, compat_block_open_disk_ref returns a reference to the
+ * gendisk, while compat_block_open_checkchg_arg is the single argument
+ * that should be passed to compat_check_disk_change(). */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,5,0)
+# define COMPAT_BLOCK_OPEN_PARAMS	struct block_device *bdev, \
+					fmode_t mode
+# define COMPAT_BLOCK_RELEASE_PARAMS	struct gendisk *disk, \
+					fmode_t mode
+# define compat_block_open_disk_ref	(bdev->bd_disk)
+# define compat_block_open_checkchg_arg	(bdev)
+#else
+# define COMPAT_BLOCK_OPEN_PARAMS	struct gendisk *disk, \
+					blk_mode_t mode
+# define COMPAT_BLOCK_RELEASE_PARAMS	struct gendisk *disk
+# define compat_block_open_disk_ref	(disk)
+# define compat_block_open_checkchg_arg	(disk)
 #endif

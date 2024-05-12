@@ -902,7 +902,7 @@ static DEFINE_MUTEX(open_release_mutex);
 /*
  * Called when our block device is opened.
  */
-static int dex_block_open(struct block_device *bdev, fmode_t mode)
+static int dex_block_open(COMPAT_BLOCK_OPEN_PARAMS)
 {
 	struct dex_device *dex;
 	int ret;
@@ -912,7 +912,7 @@ static int dex_block_open(struct block_device *bdev, fmode_t mode)
 	if (mutex_lock_interruptible(&open_release_mutex))
 		return -ERESTARTSYS;
 
-	dex = bdev->bd_disk->private_data;
+	dex = compat_block_open_disk_ref->private_data;
 
 	ret = dex_get(dex);
 
@@ -925,7 +925,7 @@ static int dex_block_open(struct block_device *bdev, fmode_t mode)
 		if (ret < 0)
 			goto out;
 
-		compat_check_disk_change(bdev);
+		compat_check_disk_change(compat_block_open_checkchg_arg);
 	}
 
 out:
@@ -942,7 +942,7 @@ out:
 /*
  * Called when our block device is closed.
  */
-static COMPAT_RELEASE_RETTYPE dex_block_release(struct gendisk *disk, fmode_t mode)
+static COMPAT_RELEASE_RETTYPE dex_block_release(COMPAT_BLOCK_RELEASE_PARAMS)
 {
 	struct dex_device *dex;
 
