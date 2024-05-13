@@ -1187,13 +1187,13 @@ static void dex_tty_write(struct dex_device *dex)
 /* Called by the tty driver when data is coming in */
 static void dex_tty_receive_buf(struct tty_struct *tty,
 				const unsigned char *buf,
-				COMPAT_TTY_RECEIVE_BUF_CONST char *fp,
-				int count)
+				COMPAT_TTY_RECEIVE_BUF_CONST COMPAT_TTY_RECEIVE_BUF_UNSIGNED char *fp,
+				COMPAT_TTY_RECEIVE_BUF_COUNT_TYPE count)
 {
 	struct dex_device *dex = tty->disc_data;
 	unsigned long flags;
 
-	PDEBUG("> dex_tty_receive_buf(%p, %p, %p, %u)", tty, buf, fp, count);
+	PDEBUG("> dex_tty_receive_buf(%p, %p, %p, %lu)", tty, buf, fp, (size_t)count);
 
 	spin_lock_irqsave(&dex->lock, flags);
 

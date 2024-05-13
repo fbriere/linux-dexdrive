@@ -146,6 +146,15 @@
 # define compat_tty_unregister_ldisc(ldisc) \
 	({ tty_unregister_ldisc(ldisc); 0; })
 #endif
+/* Since 6.6, the fp argument is also marked as unsigned, and `count` is
+ * now of type size_t. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,6,0)
+# define COMPAT_TTY_RECEIVE_BUF_UNSIGNED
+# define COMPAT_TTY_RECEIVE_BUF_COUNT_TYPE	int
+#else
+# define COMPAT_TTY_RECEIVE_BUF_UNSIGNED	unsigned
+# define COMPAT_TTY_RECEIVE_BUF_COUNT_TYPE	size_t
+#endif
 
 /* 5.14 introduces blk_alloc_disk(), which automatically allocates a
  * request_queue along with the gendisk.  Among other things, this requires
