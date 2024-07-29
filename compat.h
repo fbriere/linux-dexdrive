@@ -159,16 +159,20 @@
 /* 5.14 introduces blk_alloc_disk(), which automatically allocates a
  * request_queue along with the gendisk.  Among other things, this requires
  * us to change the order in which we initialize both structures. */
-/* Since 6.9, blk_alloc_disk() also requires an additional first argument. */
+/* Since 6.9, blk_alloc_disk() also requires a queue_limits pointer as first
+ * argument. */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)
 # undef COMPAT_USES_BLK_ALLOC_DISK
-# define compat_blk_alloc_disk()	alloc_disk(1)
+# undef COMPAT_USES_BLK_ALLOC_DISK_WITH_LIMITS
+# define compat_blk_alloc_disk(lim)	alloc_disk(1)
 #elif LINUX_VERSION_CODE < KERNEL_VERSION(6,9,0)
 # define COMPAT_USES_BLK_ALLOC_DISK
-# define compat_blk_alloc_disk()	blk_alloc_disk(NUMA_NO_NODE)
+# undef COMPAT_USES_BLK_ALLOC_DISK_WITH_LIMITS
+# define compat_blk_alloc_disk(lim)	blk_alloc_disk(NUMA_NO_NODE)
 #else
 # define COMPAT_USES_BLK_ALLOC_DISK
-# define compat_blk_alloc_disk()	blk_alloc_disk(NULL, NUMA_NO_NODE)
+# define COMPAT_USES_BLK_ALLOC_DISK_WITH_LIMITS
+# define compat_blk_alloc_disk(lim)	blk_alloc_disk(&lim, NUMA_NO_NODE)
 #endif
 /* blk_cleanup_disk() was further removed in 6.0 */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)

@@ -1003,7 +1003,9 @@ static struct block_device_operations dex_bdops = {
  */
 static void dex_block_setup_request_queue(struct dex_device *dex)
 {
+#ifndef COMPAT_USES_BLK_ALLOC_DISK_WITH_LIMITS
 	blk_queue_logical_block_size(dex->request_queue, DEX_REQUEST_QUEUE_BLOCK_SIZE);
+#endif
 
 	dex->request_queue->queuedata = dex;
 	compat_blk_queue_make_request(dex->request_queue, dex_block_make_request);
@@ -1020,6 +1022,11 @@ static void dex_block_setup_request_queue(struct dex_device *dex)
 static void dex_block_post_setup_work (struct work_struct *work);
 static int dex_block_setup(struct dex_device *dex)
 {
+#ifdef COMPAT_USES_BLK_ALLOC_DISK_WITH_LIMITS
+	struct queue_limits lim = {
+		.logical_block_size	= DEX_REQUEST_QUEUE_BLOCK_SIZE,
+	};
+#endif
 	int ret;
 
 #ifndef COMPAT_USES_BLK_ALLOC_DISK
@@ -1039,7 +1046,7 @@ static int dex_block_setup(struct dex_device *dex)
 		return -ENOMEM;
 	}
 
-	dex->gd = compat_blk_alloc_disk();
+	dex->gd = compat_blk_alloc_disk(lim);
 	if (IS_ERR_OR_NULL(dex->gd)) {
 		warn("cannot allocate gendisk struct");
 		ret = dex->gd ? PTR_ERR(dex->gd) : -ENOMEM;
