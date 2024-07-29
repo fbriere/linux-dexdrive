@@ -1037,9 +1037,9 @@ static int dex_block_setup(struct dex_device *dex)
 	}
 
 	dex->gd = compat_blk_alloc_disk();
-	if (! dex->gd) {
+	if (IS_ERR_OR_NULL(dex->gd)) {
 		warn("cannot allocate gendisk struct");
-		ret = -ENOMEM;
+		ret = dex->gd ? PTR_ERR(dex->gd) : -ENOMEM;
 		goto err;
 	}
 	dex->gd->major = major;
