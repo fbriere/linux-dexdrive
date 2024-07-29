@@ -99,6 +99,9 @@ enum dex_opcode {
 #define DEX_INIT_STR	"\x10\x29\x23\xbe\x84\xe1\x6c\xd6\xae\x52" \
 				"\x90\x49\xf1\xf1\xbb\xe9\xeb"
 
+/* Logical block size for our block request queue */
+#define DEX_REQUEST_QUEUE_BLOCK_SIZE	512
+
 
 static unsigned int major;
 module_param(major, uint, 0);
@@ -1000,7 +1003,7 @@ static struct block_device_operations dex_bdops = {
  */
 static void dex_block_setup_request_queue(struct dex_device *dex)
 {
-	blk_queue_logical_block_size(dex->request_queue, 512);
+	blk_queue_logical_block_size(dex->request_queue, DEX_REQUEST_QUEUE_BLOCK_SIZE);
 
 	dex->request_queue->queuedata = dex;
 	compat_blk_queue_make_request(dex->request_queue, dex_block_make_request);
